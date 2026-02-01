@@ -212,13 +212,18 @@ def _extract_instagram_from_description(description: str) -> str:
 
 
 def _extract_instagram_display_name(description: str, instagram_url: str = "") -> str:
-    """説明文のHTML <a href="instagram...">表示名</a> から表示名を抽出。なければURLのユーザー名をフォールバック"""
+    """説明文のHTML <a href="instagram...">表示名</a> から表示名を抽出。リンクテキストがURLの場合は使わずユーザー名を返す"""
     if description:
         # <a ... href="...instagram...">表示名</a> の表示名部分を取得
         match = re.search(r'<a[^>]*href="[^"]*instagram[^"]*"[^>]*>([^<]+)</a>', description, re.I)
         if match:
-            return match.group(1).strip()
-    # プレーンテキストのみの場合：Instagram URL のユーザー名部分を返す（表示名の代わり）
+            text = match.group(1).strip()
+            # リンクテキストがURLそのもの（名前ではない）の場合は表示名として使わない
+            if not text or "instagram.com" in text or text.startswith("http"):
+                pass  # フォールバックへ
+            else:
+                return text
+    # プレーンテキストのみ、またはリンクがURLのとき：Instagram URL のユーザー名部分を返す
     if instagram_url:
         m = re.search(r"instagram\.com/([^/?\s]+)", instagram_url, re.I)
         if m:

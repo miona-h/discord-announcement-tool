@@ -53,11 +53,13 @@ class AnnouncementGenerator:
                 event_data['time_jp'] = time_str
         if 'genre' in event_data and event_data.get('genre'):
             event_data['genre'] = config.add_genre_emoji(str(event_data['genre']))
-        # 講師名が空でInstagram URLがある場合は、URLのユーザー名を講師名として表示
-        if not event_data.get('teacher_name') and event_data.get('instagram_url'):
-            m = re.search(r'instagram\.com/([^/?\s]+)', event_data['instagram_url'], re.I)
-            if m:
-                event_data['teacher_name'] = m.group(1).strip()
+        # 講師名が空、または講師名がURLのままの場合は、Instagramのユーザー名を講師名として表示（名前をリンクにしない）
+        teacher = event_data.get('teacher_name') or ''
+        if ('instagram.com' in teacher or teacher.startswith('http')) or (not teacher and event_data.get('instagram_url')):
+            if event_data.get('instagram_url'):
+                m = re.search(r'instagram\.com/([^/?\s]+)', event_data['instagram_url'], re.I)
+                if m:
+                    event_data['teacher_name'] = m.group(1).strip()
         for var in config.SUPPORTED_VARIABLES:
             placeholder = f"{{{{{var}}}}}"
             value = event_data.get(var, "")
