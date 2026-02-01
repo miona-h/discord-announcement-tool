@@ -9,6 +9,7 @@ import re
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 
+# Google APIはオプション（未インストール時は連携タブを無効化）
 try:
     from google.oauth2.credentials import Credentials
     from google_auth_oauthlib.flow import Flow
@@ -24,6 +25,7 @@ SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
 
 
 def _get_flow(redirect_uri: str, client_id: str = None, client_secret: str = None):
+    """OAuth Flowを生成（client_id/secretは環境変数またはStreamlit secrets）"""
     if not GOOGLE_API_AVAILABLE:
         return None
     client_id = client_id or _get_client_id()
@@ -64,6 +66,7 @@ def _get_client_secret() -> Optional[str]:
 
 
 def get_authorization_url(redirect_uri: str) -> Optional[str]:
+    """認証URLを取得（「Googleでログイン」ボタン用）"""
     if not GOOGLE_API_AVAILABLE:
         return None
     flow = _get_flow(redirect_uri)
@@ -78,6 +81,7 @@ def get_authorization_url(redirect_uri: str) -> Optional[str]:
 
 
 def exchange_code_for_credentials(redirect_uri: str, code: str) -> Optional[Credentials]:
+    """認証コードをトークンに交換"""
     if not GOOGLE_API_AVAILABLE:
         return None
     flow = _get_flow(redirect_uri)
@@ -88,6 +92,7 @@ def exchange_code_for_credentials(redirect_uri: str, code: str) -> Optional[Cred
 
 
 def credentials_to_dict(creds: "Credentials") -> Dict:
+    """Credentialsを辞書に（session_state保存用）"""
     return {
         "token": creds.token,
         "refresh_token": getattr(creds, "refresh_token", None),
@@ -99,6 +104,7 @@ def credentials_to_dict(creds: "Credentials") -> Dict:
 
 
 def dict_to_credentials(d: Dict) -> Optional["Credentials"]:
+    """辞書からCredentialsを復元"""
     if not GOOGLE_API_AVAILABLE or not d:
         return None
     return Credentials(
@@ -130,6 +136,7 @@ def refresh_credentials_if_needed(creds: "Credentials") -> tuple:
 
 
 def get_calendar_service(credentials: "Credentials"):
+    """Calendar API サービスを取得"""
     if not GOOGLE_API_AVAILABLE:
         return None
     return build("calendar", "v3", credentials=credentials)
@@ -161,6 +168,9 @@ def fetch_upcoming_events(
     max_results: int = 250,
     days_ahead: int = 31,
 ) -> List[Dict]:
+    """
+    今後 days_ahead 日以内の予定を取得
+    """
     if not GOOGLE_API_AVAILABLE:
         return []
     try:
@@ -191,6 +201,7 @@ def fetch_upcoming_events(
 
 
 def _extract_instagram_from_description(description: str) -> str:
+    """説明文からInstagram URLを抽出"""
     if not description:
         return ""
     match = re.search(r"https://www\.instagram\.com/[^\s\)]+", description)
@@ -205,15 +216,20 @@ def _extract_instagram_from_description(description: str) -> str:
 
 
 def _format_date_time(start: Dict) -> tuple:
+    """
+    APIのstartから (date_str "M/D", time_str "HH:MM") を返す
+    """
     if "dateTime" in start:
         dt_str = start["dateTime"]
         try:
+            # RFC3339 例: 2024-01-31T12:00:00+09:00
             if "T" in dt_str:
                 dt = datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
                 return (f"{dt.month}/{dt.day}", f"{dt.hour:02d}:{dt.minute:02d}")
         except Exception:
             pass
     if "date" in start:
+        # 終日 例: 2024-01-31
         try:
             dt = datetime.strptime(start["date"], "%Y-%m-%d")
             return (f"{dt.month}/{dt.day}", "00:00")
@@ -223,6 +239,9 @@ def _format_date_time(start: Dict) -> tuple:
 
 
 def api_event_to_event_data(api_event: Dict, parse_event_name_fn) -> Dict[str, Any]:
+    """
+    Google Calendar API のイベント1件を、告知文生成用の event_data に変換
+    """
     summary = api_event.get("summary", "")
     description = api_event.get("description", "") or ""
     start = api_event.get("start", {})
@@ -242,6 +261,7 @@ def api_event_to_event_data(api_event: Dict, parse_event_name_fn) -> Dict[str, A
     else:
         event_data["instagram_url"] = event_data.get("instagram_url", "")
 
+    # API用の生データを保持（表示用）
     event_data["_raw_summary"] = summary
     event_data["_raw_description"] = description[:200] if description else ""
 
