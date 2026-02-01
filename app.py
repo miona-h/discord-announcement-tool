@@ -248,7 +248,7 @@ if GOOGLE_API_AVAILABLE:
                         generator = AnnouncementGenerator(templates_override=st.session_state.get("custom_templates", {}))
                         is_valid, errors = generator.validate_event_data(ed)
                         if not is_valid:
-                            st.warning("入力情報に不備があります（手動で補完するか、貼り付け入力をお試しください）")
+                            st.warning("入力情報に不備があります（手動入力タブで補完してください）")
                             for err in errors:
                                 st.write(f"• {err}")
                         else:

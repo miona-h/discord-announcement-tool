@@ -12,21 +12,28 @@ from typing import Dict, Optional
 import config
 
 
+def _default_templates_path() -> str:
+    """generate_announcement.py と同じディレクトリの templates/templates.csv の絶対パス（実行場所に依存しない）"""
+    _base = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(_base, "templates", "templates.csv")
+
+
 class AnnouncementGenerator:
     """告知文章生成クラス"""
     
     def __init__(self, templates_path: str = None, templates_override: Optional[Dict[str, str]] = None):
-        self.templates_path = templates_path or config.TEMPLATES_CSV_PATH
+        self.templates_path = templates_path or _default_templates_path()
         base = self._load_templates()
         override = templates_override or {}
         self.templates = {**base, **override}
     
     def _load_templates(self) -> Dict[str, str]:
         templates = {}
-        if not os.path.exists(self.templates_path):
+        path = self.templates_path
+        if not path or not os.path.exists(path):
             return templates
         try:
-            with open(self.templates_path, 'r', encoding='utf-8') as f:
+            with open(path, 'r', encoding='utf-8') as f:
                 reader = csv.DictReader(f)
                 for row in reader:
                     event_type = row.get('event_type', '').strip()
@@ -34,8 +41,8 @@ class AnnouncementGenerator:
                     if event_type and template:
                         templates[event_type] = template
         except Exception as e:
-            print(f"エラー: テンプレートファイルの読み込みに失敗しました: {e}")
-            sys.exit(1)
+            print(f"エラー: テンプレートファイルの読み込みに失敗しました: {e}", file=sys.stderr)
+            return templates
         return templates
     
     def _replace_variables(self, template: str, event_data: Dict) -> str:
