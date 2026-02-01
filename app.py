@@ -47,17 +47,8 @@ def _handle_oauth_callback():
         code = code[0]
     if not code:
         return
-    # 既に連携済みでURLにcodeだけ残っている場合：URLを掃除して再表示
+    # 既に連携済みでURLにcodeだけ残っている場合：交換せずそのまま表示（rerunしない＝セッション維持）
     if "google_credentials" in st.session_state:
-        try:
-            st.query_params.clear()
-        except Exception:
-            for key in list(st.query_params.keys()):
-                try:
-                    del st.query_params[key]
-                except Exception:
-                    pass
-        st.rerun()
         return
     redirect_uri = os.environ.get("REDIRECT_URI") or (
         st.secrets.get("REDIRECT_URI") if hasattr(st, "secrets") else None
@@ -66,25 +57,15 @@ def _handle_oauth_callback():
         creds = exchange_code_for_credentials(redirect_uri, code)
     except Exception as e:
         st.session_state["oauth_error"] = str(e)
-        st.rerun()
         return
     if creds:
         st.session_state["google_credentials"] = credentials_to_dict(creds)
         st.session_state["oauth_just_completed"] = True
         if "oauth_error" in st.session_state:
             del st.session_state["oauth_error"]
-        try:
-            st.query_params.clear()
-        except Exception:
-            for key in list(st.query_params.keys()):
-                try:
-                    del st.query_params[key]
-                except Exception:
-                    pass
-        st.rerun()
+        # rerunしない＝このまま描画を続けて「連携済み」を表示（Streamlit Cloudでrerunするとセッションが消えて空白になるため）
     else:
         st.session_state["oauth_error"] = "トークンの取得に失敗しました。もう一度「Googleカレンダーと連携する」からやり直してください。"
-        st.rerun()
 
 if GOOGLE_API_AVAILABLE:
     _handle_oauth_callback()
