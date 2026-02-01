@@ -25,10 +25,15 @@ FIXED_ZOOM_INFO = {
         "meeting_id": "867 8339 1679",
         "passcode": "0000"
     },
-    "ジャンル特化グルコン（卒業生向け）": {
-        "zoom_url": "https://us06web.zoom.us/j/86783391679?pwd=A7t1L99e5NHZBJOj5tMEPNHOUAyhh8.1",
-        "meeting_id": "867 8339 1679",
-        "passcode": "0000"
+    "万垢生限定オン会（事前告知）": {
+        "zoom_url": "https://us06web.zoom.us/j/82465129951?pwd=hGUx2VD6SwjqgHZOsAjTW8UYjq9K7a.1",
+        "meeting_id": "824 6512 9951",
+        "passcode": "311619"
+    },
+    "万垢生限定オン会（間もなく開始）": {
+        "zoom_url": "https://us06web.zoom.us/j/82465129951?pwd=hGUx2VD6SwjqgHZOsAjTW8UYjq9K7a.1",
+        "meeting_id": "824 6512 9951",
+        "passcode": "311619"
     },
     "生徒対談（事前告知）": {
         "zoom_url": "https://us06web.zoom.us/j/84044741268?pwd=kkc7BHgUm82aaiNC3HxHGZVMSVF799.1",
@@ -82,13 +87,7 @@ GENRE_EMOJI_MAP = {
     "エンタメ": "🎬",
     "スポーツ": "⚽",
     "音楽": "🎵",
-    "アート": "🎨",
-    "テクノロジー": "💻",
-    "投資": "📈",
-    "不動産": "🏘️",
-    "婚活": "💑",
-    "ママ": "👩‍👧",
-    "パパ": "👨‍👦",
+    "クリエイティブ": "🎨",
 }
 
 def add_genre_emoji(genre: str) -> str:
