@@ -10,7 +10,9 @@ from typing import Dict
 
 def parse_event_name(event_name: str) -> Dict[str, str]:
     result = {}
-    if "ジャンル特化グルコン" in event_name:
+    if "万垢生限定オン会" in event_name or ("万垢" in event_name and "限定オン会" in event_name):
+        result["event_type"] = "万垢生限定オン会（事前告知）"
+    elif "ジャンル特化グルコン" in event_name:
         result["event_type"] = "ジャンル特化グルコン（事前告知）"
     elif "生徒対談" in event_name:
         result["event_type"] = "生徒対談（事前告知）"
