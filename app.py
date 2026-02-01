@@ -95,15 +95,27 @@ if GOOGLE_API_AVAILABLE:
         if "google_credentials" not in st.session_state:
             st.markdown("**Googleカレンダーと連携して、予定を自動で取り込みます**")
             if auth_url:
-                # 新しいタブで開く（Streamlit Cloudで同じタブだとログイン画面が出ない場合があるため）
+                # 同じタブで開く（許可後にこのタブに戻り、連携済みが表示されるようにする）
                 st.markdown(
-                    f'<a href="{auth_url}" target="_blank" rel="noopener noreferrer" '
-                    'style="display:inline-block;padding:0.5rem 1rem;background:#FF4B4B;color:white;'
-                    'text-decoration:none;border-radius:0.5rem;font-weight:500;">'
+                    f'<a href="{auth_url}" style="display:inline-block;padding:0.5rem 1rem;'
+                    'background:#FF4B4B;color:white;text-decoration:none;border-radius:0.5rem;font-weight:500;">'
                     '🔗 Googleカレンダーと連携する</a>',
                     unsafe_allow_html=True,
                 )
-                st.caption("クリックすると新しいタブでGoogleのログイン画面が開きます。ポップアップを許可してください。")
+                st.caption("クリックしてGoogleでログインし、許可するとこのページに戻り「連携済み」と表示されます。")
+                # 設定確認（redirect_uri_mismatch の診断用）
+                with st.expander("🔧 redirect_uri_mismatch が出る場合の確認"):
+                    st.code(redirect_uri, language=None)
+                    st.markdown("""
+**上記のURLが以下と完全に一致しているか確認してください：**
+
+1. **ブラウザのアドレスバー**：今開いているこのページのURL（`https://〇〇〇.streamlit.app`）
+2. **Google Cloud**：認証情報 → OAuthクライアントID → 承認済みのリダイレクトURI
+3. **Streamlit Secrets**：`REDIRECT_URI` の値
+
+`http://localhost:8501` と表示されている場合、Streamlit Cloud の **Settings → Secrets** で
+`REDIRECT_URI = "https://あなたのアプリURL.streamlit.app"` を追加してください。
+                    """)
             else:
                 st.info("Google連携を使うには、管理者がGoogle CloudでOAuth設定を行う必要があります。")
         else:
