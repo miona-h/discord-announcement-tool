@@ -12,38 +12,56 @@ from typing import Dict, Optional
 import config
 
 
-def _default_templates_path() -> str:
-    """generate_announcement.py と同じディレクトリの templates/templates.csv の絶対パス（実行場所に依存しない）"""
+def _templates_candidate_paths() -> list:
+    """テンプレートCSVを探すパス候補（複数試して確実に読み込む）"""
+    candidates = []
+    # 1. generate_announcement.py と同じディレクトリ
     _base = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(_base, "templates", "templates.csv")
+    candidates.append(os.path.join(_base, "templates", "templates.csv"))
+    # 2. config のパス
+    try:
+        candidates.append(config.TEMPLATES_CSV_PATH)
+    except Exception:
+        pass
+    # 3. カレントワーキングディレクトリ
+    candidates.append(os.path.join(os.getcwd(), "templates", "templates.csv"))
+    return candidates
+
+
+def _load_templates_from_path(path: str) -> Dict[str, str]:
+    """指定パスからテンプレートを読み込む。失敗時は空辞書"""
+    templates = {}
+    if not path or not os.path.exists(path):
+        return templates
+    try:
+        with open(path, 'r', encoding='utf-8-sig') as f:  # utf-8-sig で BOM 対応
+            reader = csv.DictReader(f)
+            for row in reader:
+                event_type = (row.get('event_type') or '').strip()
+                template = (row.get('template') or '').strip()
+                if event_type and template:
+                    templates[event_type] = template
+    except Exception:
+        pass
+    return templates
 
 
 class AnnouncementGenerator:
     """告知文章生成クラス"""
     
     def __init__(self, templates_path: str = None, templates_override: Optional[Dict[str, str]] = None):
-        self.templates_path = templates_path or _default_templates_path()
-        base = self._load_templates()
+        self.templates_path = templates_path
+        base = {}
+        if templates_path:
+            base = _load_templates_from_path(templates_path)
+        if not base:
+            for path in _templates_candidate_paths():
+                base = _load_templates_from_path(path)
+                if base:
+                    self.templates_path = path
+                    break
         override = templates_override or {}
         self.templates = {**base, **override}
-    
-    def _load_templates(self) -> Dict[str, str]:
-        templates = {}
-        path = self.templates_path
-        if not path or not os.path.exists(path):
-            return templates
-        try:
-            with open(path, 'r', encoding='utf-8') as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    event_type = row.get('event_type', '').strip()
-                    template = row.get('template', '').strip()
-                    if event_type and template:
-                        templates[event_type] = template
-        except Exception as e:
-            print(f"エラー: テンプレートファイルの読み込みに失敗しました: {e}", file=sys.stderr)
-            return templates
-        return templates
     
     def _replace_variables(self, template: str, event_data: Dict) -> str:
         result = template
