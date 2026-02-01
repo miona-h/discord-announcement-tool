@@ -264,10 +264,15 @@ def api_event_to_event_data(api_event: Dict, parse_event_name_fn) -> Dict[str, A
     else:
         event_data["instagram_url"] = event_data.get("instagram_url", "")
 
-    # 講師名：説明文のHTML表示名（例：カナノ⌇埼玉グルメ＆カフェ）があればそれを使う。なければInstagramのユーザー名
+    # 講師名：説明文のHTML表示名があればそれを使う。なければInstagramのユーザー名（URLから抽出）を必ず入れる
     display_name = _extract_instagram_display_name(description, instagram_url)
     if display_name:
         event_data["teacher_name"] = display_name
+    elif event_data.get("instagram_url"):
+        # 表示名が取れない場合はURLのユーザー名（例: nono.seisaku.book）を講師名として表示
+        fallback = _extract_instagram_display_name("", event_data["instagram_url"])
+        if fallback:
+            event_data["teacher_name"] = fallback
 
     event_data["_raw_summary"] = summary
     event_data["_raw_description"] = description[:200] if description else ""
