@@ -158,19 +158,6 @@ if GOOGLE_API_AVAILABLE:
                     unsafe_allow_html=True,
                 )
                 st.caption("クリックしてGoogleでログインし、許可するとこのページに戻り「連携済み」と表示されます。")
-                # 設定確認（redirect_uri_mismatch の診断用）
-                with st.expander("🔧 redirect_uri_mismatch が出る場合の確認"):
-                    st.code(redirect_uri, language=None)
-                    st.markdown("""
-**上記のURLが以下と完全に一致しているか確認してください：**
-
-1. **ブラウザのアドレスバー**：今開いているこのページのURL（`https://〇〇〇.streamlit.app`）
-2. **Google Cloud**：認証情報 → OAuthクライアントID → 承認済みのリダイレクトURI
-3. **Streamlit Secrets**：`REDIRECT_URI` の値
-
-`http://localhost:8501` と表示されている場合、Streamlit Cloud の **Settings → Secrets** で
-`REDIRECT_URI = "https://あなたのアプリURL.streamlit.app"` を追加してください。
-                    """)
             else:
                 st.info("Google連携を使うには、管理者がGoogle CloudでOAuth設定を行う必要があります。")
         else:
