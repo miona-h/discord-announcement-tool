@@ -4,12 +4,17 @@ Discordオンラインイベント配信文章 自動生成ツール - Web版
 
 使い方:
     streamlit run app.py
+
+    または
+
+    python -m streamlit run app.py
 """
 
 import streamlit as st
 import sys
 import os
 
+# プロジェクトルートをパスに追加
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from parse_calendar import parse_calendar_text, parse_event_name
@@ -40,6 +45,7 @@ st.set_page_config(
 st.title("📢 Discord告知文 自動生成ツール")
 st.caption("SnsClubオンラインイベント用の告知文章を生成します")
 
+# クエリパラメータでOAuthコールバック（code）を処理
 def _handle_oauth_callback():
     try:
         q = st.query_params
@@ -54,9 +60,9 @@ def _handle_oauth_callback():
         creds = exchange_code_for_credentials(redirect_uri, code)
         if creds:
             st.session_state["google_credentials"] = credentials_to_dict(creds)
-            st.session_state["oauth_just_completed"] = True
+            st.session_state["oauth_just_completed"] = True  # 連携完了メッセージ用
             try:
-                st.query_params.clear()
+                st.query_params.clear()  # URLから認証コードを削除
             except Exception:
                 try:
                     for key in list(st.query_params.keys()):
@@ -70,6 +76,7 @@ def _handle_oauth_callback():
 if GOOGLE_API_AVAILABLE:
     _handle_oauth_callback()
 
+# タブ：Google連携 / 貼り付け / 手動入力
 tab_names = ["🔗 Googleカレンダーと連携", "📋 貼り付けで入力", "✏️ 手動入力"]
 if not GOOGLE_API_AVAILABLE:
     tab_names = ["📋 貼り付けで入力", "✏️ 手動入力"]
@@ -77,6 +84,7 @@ if not GOOGLE_API_AVAILABLE:
 tabs = st.tabs(tab_names)
 tab_idx = 0
 
+# --- Googleカレンダーと連携タブ ---
 if GOOGLE_API_AVAILABLE:
     with tabs[tab_idx]:
         redirect_uri = os.environ.get("REDIRECT_URI") or (
@@ -87,8 +95,15 @@ if GOOGLE_API_AVAILABLE:
         if "google_credentials" not in st.session_state:
             st.markdown("**Googleカレンダーと連携して、予定を自動で取り込みます**")
             if auth_url:
-                st.link_button("🔗 Googleカレンダーと連携する", url=auth_url, type="primary")
-                st.caption("クリックしてGoogleでログインし、カレンダーへのアクセスを許可してください。")
+                # 新しいタブで開く（Streamlit Cloudで同じタブだとログイン画面が出ない場合があるため）
+                st.markdown(
+                    f'<a href="{auth_url}" target="_blank" rel="noopener noreferrer" '
+                    'style="display:inline-block;padding:0.5rem 1rem;background:#FF4B4B;color:white;'
+                    'text-decoration:none;border-radius:0.5rem;font-weight:500;">'
+                    '🔗 Googleカレンダーと連携する</a>',
+                    unsafe_allow_html=True,
+                )
+                st.caption("クリックすると新しいタブでGoogleのログイン画面が開きます。ポップアップを許可してください。")
             else:
                 st.info("Google連携を使うには、管理者がGoogle CloudでOAuth設定を行う必要があります。")
         else:
@@ -161,6 +176,7 @@ if GOOGLE_API_AVAILABLE:
                         st.error(f"エラー: {e}")
     tab_idx += 1
 
+# --- 貼り付けで入力タブ ---
 with tabs[tab_idx]:
     st.markdown("""
     **Googleカレンダーの予定をコピー＆ペーストしてください**
@@ -183,9 +199,11 @@ with tabs[tab_idx]:
     )
 tab_idx += 1
 
+# --- 手動入力タブ ---
 with tabs[tab_idx]:
     st.markdown("**イベント情報を手動で入力**")
     col1, col2 = st.columns(2)
+    
     with col1:
         manual_event_type = st.selectbox(
             "イベント種別",
@@ -203,18 +221,23 @@ with tabs[tab_idx]:
         )
         manual_date = st.text_input("開催日", placeholder="例: 1/31")
         manual_time = st.text_input("開始時間", placeholder="例: 12:00")
+    
     with col2:
         manual_genre = st.text_input("ジャンル（グルコンの場合）", placeholder="例: レシピジャンル")
         manual_teacher = st.text_input("講師名", placeholder="例: よだれ夫婦")
         manual_instagram = st.text_input("Instagramリンク", placeholder="https://www.instagram.com/...")
 
+# 生成ボタン（貼り付け・手動入力タブ用）
 if st.button("📝 告知文を生成", type="primary", key="btn_generate"):
     event_data = None
+    
     if calendar_text.strip():
+        # カレンダーからパース
         try:
             event_data = parse_calendar_text(calendar_text)
             required = ['date', 'time', 'event_type']
             missing = [f for f in required if f not in event_data]
+            
             if missing:
                 st.warning(f"以下の情報が不足しています: {', '.join(missing)}")
                 st.json(event_data)
@@ -223,31 +246,37 @@ if st.button("📝 告知文を生成", type="primary", key="btn_generate"):
             st.error(f"パースエラー: {e}")
             event_data = None
     else:
+        # 手動入力から作成
         event_data = {
             "event_type": manual_event_type,
             "date": manual_date,
             "time": manual_time,
         }
+        
         if manual_genre:
             event_data["genre"] = manual_genre
         if manual_teacher:
             event_data["teacher_name"] = manual_teacher
         if manual_instagram:
             event_data["instagram_url"] = manual_instagram
+        
+        # 必須項目チェック
         if not manual_date or not manual_time:
             st.warning("開催日と開始時間は必須です")
             event_data = None
-
+    
     if event_data:
         try:
             generator = AnnouncementGenerator()
             is_valid, errors = generator.validate_event_data(event_data)
+            
             if not is_valid:
                 st.warning("入力情報に不備があります")
                 for err in errors:
                     st.write(f"• {err}")
             else:
                 announcement = generator.generate(event_data)
+                
                 if announcement:
                     st.success("告知文を生成しました！")
                     st.text_area(
