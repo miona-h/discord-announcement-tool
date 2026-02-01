@@ -23,8 +23,8 @@ def parse_event_name(event_name: str) -> Dict[str, str]:
     else:
         result["event_type"] = "ジャンル特化グルコン（事前告知）"
 
-    # ジャンル: （〇〇）から抽出（例: （スポット）→ スポット）
-    match_genre = re.search(r'（(.+?)）', event_name)
+    # ジャンル: （〇〇）または (〇〇) から抽出（例: （スポット）/(スポット) → スポット）
+    match_genre = re.search(r'（(.+?)）', event_name) or re.search(r'\((.+?)\)', event_name)
     if match_genre:
         genre = match_genre.group(1).strip()
         try:
@@ -35,10 +35,12 @@ def parse_event_name(event_name: str) -> Dict[str, str]:
     else:
         result["genre"] = ""
 
-    # 講師名・ゲスト名: 新カレンダー名形式に合わせて抽出
+    # 講師名・ゲスト名: 予定名（タイトル）から抽出。ジャンル特化は「名前（ジャンル）」形式
     if "ジャンル特化グルコン" in event_name:
-        # 【ジャンル特化グルコン】 カナノ⌇埼玉グルメ＆カフェ（スポット）
+        # 【ジャンル特化グルコン】 カナノ⌇埼玉グルメ＆カフェ（スポット）または (スポット)
         m = re.search(r'【ジャンル特化グルコン】\s*(.+?)（.+?）', event_name)
+        if not m:
+            m = re.search(r'【ジャンル特化グルコン】\s*(.+?)\(.+?\)', event_name)
         if m:
             result["teacher_name"] = m.group(1).strip()
         else:
