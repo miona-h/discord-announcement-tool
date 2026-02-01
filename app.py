@@ -366,7 +366,7 @@ with tabs[tab_idx]:
         manual_time = st.text_input("開始時間", placeholder="例: 12:00")
     with col2:
         manual_genre = st.text_input("ジャンル（グルコンの場合）", placeholder="例: レシピジャンル")
-        manual_teacher = st.text_input("講師名", placeholder="例: よだれ夫婦")
+        manual_teacher = st.text_input("講師名", placeholder="例: アカウント名")
         manual_instagram = st.text_input("Instagramリンク", placeholder="https://www.instagram.com/...")
 
 tab_idx += 1
