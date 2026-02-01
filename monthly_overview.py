@@ -7,9 +7,12 @@ from typing import Dict, List, Any
 
 try:
     import config
-    MONTHLY_GENRE_DISCORD_EMOJI = getattr(config, "MONTHLY_GENRE_DISCORD_EMOJI", {})
+    GENRE_EMOJI_MAP = getattr(config, "GENRE_EMOJI_MAP", {})
 except ImportError:
-    MONTHLY_GENRE_DISCORD_EMOJI = {}
+    GENRE_EMOJI_MAP = {}
+
+# 育児と子育ては同一ジャンルとして「育児」に統一（グループ化・表記用）
+GENRE_NORMALIZE = {"子育て": "育児"}
 
 WEEKDAY_JA = ["月", "火", "水", "木", "金", "土", "日"]
 
@@ -62,23 +65,32 @@ def _format_date_short(date_str: str, time_str: str, year: int) -> str:
         return f"{date_str} {time_str}～"
 
 
-def _genre_discord_emoji(genre: str) -> str:
-    """ジャンル文字列からDiscord絵文字コードを返す（例: スポット → :round_pushpin:）"""
+def _genre_base(genre: str) -> str:
+    """絵文字・ジャンル接尾を除いたベース名。育児・子育ては「育児」に統一"""
     if not genre:
         return ""
-    genre_clean = re.sub(r"^[\s\U0001F300-\U0001F9FF]+", "", str(genre)).replace("ジャンル", "").strip()
-    for keyword, emoji in MONTHLY_GENRE_DISCORD_EMOJI.items():
-        if keyword in genre or keyword in genre_clean:
-            return emoji
+    g = re.sub(r"^[\s\U0001F300-\U0001F9FF]+", "", str(genre)).replace("ジャンル", "").strip()
+    return GENRE_NORMALIZE.get(g, g) or g
+
+
+def _genre_emoji(genre: str) -> str:
+    """GENRE_EMOJI_MAP の絵文字を返す（例: スポット → 📍）"""
+    if not genre:
+        return ""
+    base = _genre_base(genre)
+    for keyword, emoji in GENRE_EMOJI_MAP.items():
+        norm = GENRE_NORMALIZE.get(keyword, keyword)
+        if keyword in genre or base == norm or base == keyword or norm in genre:
+            return emoji or ""
     return ""
 
 
 def _genre_display_name(genre: str) -> str:
-    """表示用ジャンル名（例: スポットジャンル）"""
+    """表示用ジャンル名。育児・子育ては「育児ジャンル」に統一"""
     if not genre:
         return ""
-    g = re.sub(r"^[\s\U0001F300-\U0001F9FF]+", "", str(genre)).strip()
-    return f"{g}ジャンル" if "ジャンル" not in g else g
+    base = _genre_base(genre)
+    return f"{base}ジャンル" if base else ""
 
 
 def _num(i: int) -> str:
@@ -178,10 +190,10 @@ def build_monthly_overview(events: List[Dict[str, Any]], month_str: str) -> str:
 
     if genre_events:
         by_genre: Dict[str, List[Dict]] = {}
-        genre_order: List[str] = []  # 最初に出た順を保持
+        genre_order: List[str] = []  # 最初に出た順を保持（育児・子育ては「育児」に統一）
         for ev in genre_events:
             g = ev.get("genre", "") or "その他"
-            g_key = re.sub(r"^[\s\U0001F300-\U0001F9FF]+", "", str(g)).strip()
+            g_key = _genre_base(g) or re.sub(r"^[\s\U0001F300-\U0001F9FF]+", "", str(g)).replace("ジャンル", "").strip()
             if not g_key:
                 g_key = "その他"
             if g_key not in by_genre:
@@ -191,8 +203,9 @@ def build_monthly_overview(events: List[Dict[str, Any]], month_str: str) -> str:
 
         for g_key in genre_order:
             group = sort_by_date(by_genre[g_key])
-            emoji = _genre_discord_emoji(group[0].get("genre", "") or g_key)
-            label = _genre_display_name(group[0].get("genre", "") or g_key)
+            raw_genre = group[0].get("genre", "") or g_key
+            emoji = _genre_emoji(raw_genre)
+            label = _genre_display_name(raw_genre) or f"{g_key}ジャンル"
             lines.append(f"## {emoji}{label}")
             lines.append("")
             for i, ev in enumerate(group, 1):

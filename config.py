@@ -92,33 +92,6 @@ GENRE_EMOJI_MAP = {
     "クリエイティブ": "🎨",
 }
 
-# 月全体案内用：ジャンル → Discord絵文字コード（## :house:暮らしジャンル など）
-MONTHLY_GENRE_DISCORD_EMOJI = {
-    "エンタメ": ":clown:",
-    "暮らし": ":house:",
-    "育児": ":rainbow:",
-    "子育て": ":rainbow:",
-    "レシピ": ":cooking:",
-    "ダイエット": ":woman_running_tone1:",
-    "スポット": ":round_pushpin:",
-    "旅行": ":airplane:",
-    "グルメ": ":fork_and_knife:",
-    "美容": ":nail_care:",
-    "ファッション": ":shirt:",
-    "健康": ":person_running:",
-    "ビジネス": ":briefcase:",
-    "教育": ":book:",
-    "スポーツ": ":soccer:",
-    "音楽": ":musical_note:",
-    "アート": ":art:",
-    "テクノロジー": ":laptop:",
-    "投資": ":chart_with_upwards_trend:",
-    "不動産": ":house_with_garden:",
-    "婚活": ":couple_with_heart:",
-    "ママ": ":family:",
-    "パパ": ":family:",
-}
-
 def add_genre_emoji(genre: str) -> str:
     if not genre:
         return genre
