@@ -273,27 +273,38 @@ if GOOGLE_API_AVAILABLE:
                         for k in ("_id", "_raw_summary", "_raw_description"):
                             ev_copy.pop(k, None)
                         event_type = ev_copy.get("event_type", "")
-                        post_date, post_time = _get_post_date_time(
-                            event_type, ev_copy.get("date", ""), ev_copy.get("time", "")
-                        )
-                        channel_name = _get_channel_name(event_type)
-                        is_valid = generator.validate_event_data(ev_copy)[0]
-                        if is_valid:
-                            ann = generator.generate(ev_copy) or ""
-                            msg = (ann or "").replace("\r", "\n")
-                            rows.append({
-                                "メッセージ": msg,
-                                "日付": post_date,
-                                "時間": post_time,
-                                "チャンネル名": channel_name,
-                            })
-                        else:
-                            rows.append({
-                                "メッセージ": "(テンプレートに合わないためスキップ)",
-                                "日付": post_date,
-                                "時間": post_time,
-                                "チャンネル名": channel_name,
-                            })
+                        # 1件の予定につき「事前告知」と「まもなく開始」の2行を出力（全日程に適用）
+                        for is_soon in (False, True):
+                            if is_soon:
+                                if "（事前告知）" not in event_type:
+                                    continue
+                                ev_row = ev_copy.copy()
+                                # 全角括弧で統一（事前告知→間もなく開始）
+                                ev_row["event_type"] = event_type.replace("（事前告知）", "（間もなく開始）")
+                            else:
+                                ev_row = ev_copy
+                            row_type = ev_row.get("event_type", "")
+                            post_date, post_time = _get_post_date_time(
+                                row_type, ev_row.get("date", ""), ev_row.get("time", "")
+                            )
+                            channel_name = _get_channel_name(row_type)
+                            is_valid = generator.validate_event_data(ev_row)[0]
+                            if is_valid:
+                                ann = generator.generate(ev_row) or ""
+                                msg = (ann or "").replace("\r", "\n")
+                                rows.append({
+                                    "メッセージ": msg,
+                                    "日付": post_date,
+                                    "時間": post_time,
+                                    "チャンネル名": channel_name,
+                                })
+                            else:
+                                rows.append({
+                                    "メッセージ": "(テンプレートに合わないためスキップ)",
+                                    "日付": post_date,
+                                    "時間": post_time,
+                                    "チャンネル名": channel_name,
+                                })
                     if rows:
                         import io
                         import csv as csv_module
