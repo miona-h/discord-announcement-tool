@@ -1,0 +1,4 @@
+# Discord予約配信 文章自動生成ツール (MVP)
+# Python 3.8以上推奨
+
+streamlit>=1.28.0
