@@ -22,18 +22,11 @@ def parse_event_name(event_name: str) -> Dict[str, str]:
         result["event_type"] = "オン会（事前告知）"
     else:
         result["event_type"] = "ジャンル特化グルコン（事前告知）"
-    # 講師対談: 【講師対談】はるパパ講師 -> はるパパ
-    match = re.search(r'【.*?】(.+?)講師', event_name) or re.search(r'】(.+?)講師', event_name)
-    if match:
-        result["teacher_name"] = match.group(1).strip()
-    # 生徒対談: 【生徒対談】ぽぽさん -> ぽぽさん（講師がないパターン）
-    elif "生徒対談" in event_name:
-        m = re.search(r'【生徒対談】\s*(.+)', event_name)
-        if m:
-            result["teacher_name"] = m.group(1).strip()
-    match = re.search(r'（(.+?)）', event_name)
-    if match:
-        genre = match.group(1).strip()
+
+    # ジャンル: （〇〇）から抽出（例: （スポット）→ スポット）
+    match_genre = re.search(r'（(.+?)）', event_name)
+    if match_genre:
+        genre = match_genre.group(1).strip()
         try:
             import config
             result["genre"] = config.add_genre_emoji(genre)
@@ -41,6 +34,28 @@ def parse_event_name(event_name: str) -> Dict[str, str]:
             result["genre"] = genre
     else:
         result["genre"] = ""
+
+    # 講師名・ゲスト名: 新カレンダー名形式に合わせて抽出
+    if "ジャンル特化グルコン" in event_name:
+        # 【ジャンル特化グルコン】 カナノ⌇埼玉グルメ＆カフェ（スポット）
+        m = re.search(r'【ジャンル特化グルコン】\s*(.+?)（.+?）', event_name)
+        if m:
+            result["teacher_name"] = m.group(1).strip()
+        else:
+            m = re.search(r'【ジャンル特化グルコン】\s*(.+)', event_name)
+            if m:
+                result["teacher_name"] = m.group(1).strip()
+    elif "講師対談" in event_name:
+        # 【講師対談】はるパパ⌇親子で楽しむ0歳カラダあそび
+        m = re.search(r'【講師対談】\s*(.+)', event_name)
+        if m:
+            result["teacher_name"] = m.group(1).strip()
+    elif "生徒対談" in event_name:
+        # 【生徒対談】ぽぽ⌇看護師・発酵料理士アドバイザー
+        m = re.search(r'【生徒対談】\s*(.+)', event_name)
+        if m:
+            result["teacher_name"] = m.group(1).strip()
+
     return result
 
 
