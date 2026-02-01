@@ -3,8 +3,11 @@
 共通プロンプトやデフォルト設定を管理
 """
 
-# テンプレートファイルのパス
-TEMPLATES_CSV_PATH = "templates/templates.csv"
+import os
+
+# テンプレートファイルのパス（config.py と同じディレクトリ基準で絶対パスにし、どこから実行しても読み込めるようにする）
+_CONFIG_DIR = os.path.dirname(os.path.abspath(__file__))
+TEMPLATES_CSV_PATH = os.path.join(_CONFIG_DIR, "templates", "templates.csv")
 
 # 出力ディレクトリ
 OUTPUT_DIR = "output"
