@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from parse_calendar import parse_calendar_text, parse_event_name
 from generate_announcement import AnnouncementGenerator
+from monthly_overview import build_monthly_overview
 
 # Googleカレンダー連携（オプション）
 try:
@@ -326,6 +327,32 @@ if GOOGLE_API_AVAILABLE:
                         st.caption("💡 事前告知＝前日18:00・まもなく開始＝開始5分前。A列=メッセージ, B列=日付(投稿日), C列=時間(投稿時間), D列=チャンネル名。")
                     else:
                         st.warning("生成できる予定がありませんでした。")
+
+                st.divider()
+                st.markdown("**月全体の案内文を生成**")
+                if st.button("📅 月全体の案内文を生成", type="primary", key="btn_monthly"):
+                    ev_clean = [ed.copy() for ed in events_list]
+                    for ed in ev_clean:
+                        for k in ("_id", "_raw_summary", "_raw_description"):
+                            ed.pop(k, None)
+                    try:
+                        from datetime import datetime as dt
+                        if ev_clean and ev_clean[0].get("date"):
+                            parts = str(ev_clean[0]["date"]).strip().split("/")
+                            month_str = f"{int(parts[0])}月" if parts else f"{dt.now().month}月"
+                        else:
+                            month_str = f"{dt.now().month}月"
+                        overview = build_monthly_overview(ev_clean, month_str)
+                        st.success("月全体の案内文を生成しました！")
+                        st.text_area(
+                            "月全体の案内文（コピーしてDiscordに貼り付けてください）",
+                            overview,
+                            height=500,
+                            key="monthly_overview_output",
+                        )
+                        st.caption("💡 特別講義→講師対談→生徒対談→ジャンル特化グルコン（ジャンルごと・日付順）")
+                    except Exception as e:
+                        st.error(f"エラー: {e}")
     tab_idx += 1
 
 with tabs[tab_idx]:
@@ -440,4 +467,5 @@ st.markdown("""
 - 生徒対談（事前告知 / 間もなく開始）
 - 講師対談（事前告知 / 間もなく開始）
 - オン会（事前告知 / 間もなく開始）
+- 月全体の案内文（Googleカレンダー連携タブで「月全体の案内文を生成」）
 """)
