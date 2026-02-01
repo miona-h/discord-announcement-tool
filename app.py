@@ -12,7 +12,7 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from parse_calendar import parse_calendar_text, parse_event_name
+from parse_calendar import parse_event_name
 from generate_announcement import AnnouncementGenerator
 from monthly_overview import build_monthly_overview
 
@@ -125,9 +125,9 @@ def _handle_oauth_callback():
 if GOOGLE_API_AVAILABLE:
     _handle_oauth_callback()
 
-tab_names = ["🔗 Googleカレンダーと連携", "📋 貼り付けで入力", "✏️ 手動入力", "📝 テンプレート管理"]
+tab_names = ["🔗 Googleカレンダーと連携", "✏️ 手動入力", "📝 テンプレート管理"]
 if not GOOGLE_API_AVAILABLE:
-    tab_names = ["📋 貼り付けで入力", "✏️ 手動入力", "📝 テンプレート管理"]
+    tab_names = ["✏️ 手動入力", "📝 テンプレート管理"]
 
 tabs = st.tabs(tab_names)
 tab_idx = 0
@@ -359,28 +359,6 @@ if GOOGLE_API_AVAILABLE:
     tab_idx += 1
 
 with tabs[tab_idx]:
-    st.markdown("""
-    **Googleカレンダーの予定をコピー＆ペーストしてください**
-    
-    以下のような形式で入力：
-    ```
-    【ジャンル特化グルコン】よだれ夫婦講師（レシピジャンル）
-    1月 31日 (土曜日)⋅午後12:00～1:00
-    Instagramリンク：https://www.instagram.com/yurina_diet.recipe
-    Zoomリンク：https://us06web.zoom.us/j/...
-    ミーティング ID: 867 8339 1679
-    パスコード: 0000
-    ```
-    """)
-    calendar_text = st.text_area(
-        "カレンダー情報を貼り付け",
-        height=200,
-        placeholder="ここにGoogleカレンダーの予定を貼り付けてください...",
-        label_visibility="collapsed",
-    )
-tab_idx += 1
-
-with tabs[tab_idx]:
     st.markdown("**イベント情報を手動で入力**")
     _gen = AnnouncementGenerator(templates_override=st.session_state.get("custom_templates", {}))
     _event_type_options = sorted(_gen.templates.keys()) or [
@@ -407,8 +385,51 @@ with tabs[tab_idx]:
 tab_idx += 1
 with tabs[tab_idx]:
     st.markdown("**📝 テンプレートの追加・編集**")
-    st.caption("特別講義など、新しいイベント種別のテンプレートを追加できます。追加したテンプレートはこのセッション中のみ有効です。永続化する場合は「CSVでダウンロード」してリポジトリの templates/templates.csv に反映してください。")
+    st.caption("現在のテンプレートを一覧表示し、編集できます。追加・編集した内容はこのセッション中のみ有効です。永続化する場合は「CSVでダウンロード」して templates/templates.csv に反映してください。")
     custom = st.session_state.get("custom_templates", {})
+    base_gen = AnnouncementGenerator()
+    all_templates = {**base_gen.templates, **custom}
+
+    st.subheader("現在使用中のテンプレート一覧")
+    if "editing_template" not in st.session_state:
+        st.session_state["editing_template"] = None
+    editing = st.session_state.get("editing_template")
+
+    if all_templates:
+        for i, (event_type, body) in enumerate(sorted(all_templates.items())):
+            is_custom = event_type in custom
+            with st.expander(f"**{event_type}**" + (" ※編集済み" if is_custom else ""), expanded=(editing == event_type)):
+                if editing == event_type:
+                    new_body = st.text_area("テンプレート本文を編集", body, height=250, key=f"edit_body_{i}")
+                    col1, col2, _ = st.columns([1, 1, 2])
+                    with col1:
+                        if st.button("保存", key=f"save_edit_{i}"):
+                            custom[event_type] = new_body
+                            st.session_state["custom_templates"] = custom
+                            st.session_state["editing_template"] = None
+                            st.rerun()
+                    with col2:
+                        if st.button("キャンセル", key=f"cancel_edit_{i}"):
+                            st.session_state["editing_template"] = None
+                            st.rerun()
+                    if is_custom:
+                        if st.button("このテンプレートを削除", key=f"del_edit_{i}"):
+                            del custom[event_type]
+                            st.session_state["custom_templates"] = custom
+                            st.session_state["editing_template"] = None
+                            st.rerun()
+                else:
+                    st.text_area("本文", body[:500] + ("..." if len(body) > 500 else ""), height=120, key=f"preview_{i}", disabled=True)
+                    if st.button("編集", key=f"btn_edit_{i}"):
+                        st.session_state["editing_template"] = event_type
+                        st.rerun()
+                    if is_custom:
+                        if st.button("デフォルトに戻す", key=f"reset_{i}"):
+                            del custom[event_type]
+                            st.session_state["custom_templates"] = custom
+                            st.rerun()
+    else:
+        st.info("テンプレートがありません。下の「テンプレートを追加」で追加してください。")
 
     st.subheader("テンプレートを追加")
     with st.form("add_template_form", clear_on_submit=True):
@@ -423,21 +444,7 @@ with tabs[tab_idx]:
             else:
                 st.warning("イベント種別名とテンプレート本文を入力してください。")
 
-    st.subheader("追加したテンプレート一覧")
-    if custom:
-        for i, (event_type, body) in enumerate(list(custom.items())):
-            with st.expander(f"**{event_type}**", expanded=False):
-                st.text_area("本文", body, height=150, key=f"custom_preview_{i}", disabled=True)
-                if st.button("削除", key=f"del_custom_{i}"):
-                    del custom[event_type]
-                    st.session_state["custom_templates"] = custom
-                    st.rerun()
-    else:
-        st.info("追加したテンプレートはここに表示されます。")
-
     st.subheader("CSVでダウンロード")
-    base_gen = AnnouncementGenerator()
-    all_templates = {**base_gen.templates, **st.session_state.get("custom_templates", {})}
     if all_templates:
         import io
         import csv as csv_module
@@ -451,34 +458,20 @@ with tabs[tab_idx]:
         st.caption("ダウンロードしたCSVを templates/templates.csv に置き換えると、次回以降もその内容がデフォルトになります。")
 
 if st.button("📝 告知文を生成", type="primary", key="btn_generate"):
-    event_data = None
-    if calendar_text.strip():
-        try:
-            event_data = parse_calendar_text(calendar_text)
-            required = ['date', 'time', 'event_type']
-            missing = [f for f in required if f not in event_data]
-            if missing:
-                st.warning(f"以下の情報が不足しています: {', '.join(missing)}")
-                st.json(event_data)
-                event_data = None
-        except Exception as e:
-            st.error(f"パースエラー: {e}")
-            event_data = None
-    else:
-        event_data = {
-            "event_type": manual_event_type,
-            "date": manual_date,
-            "time": manual_time,
-        }
-        if manual_genre:
-            event_data["genre"] = manual_genre
-        if manual_teacher:
-            event_data["teacher_name"] = manual_teacher
-        if manual_instagram:
-            event_data["instagram_url"] = manual_instagram
-        if not manual_date or not manual_time:
-            st.warning("開催日と開始時間は必須です")
-            event_data = None
+    event_data = {
+        "event_type": manual_event_type,
+        "date": manual_date,
+        "time": manual_time,
+    }
+    if manual_genre:
+        event_data["genre"] = manual_genre
+    if manual_teacher:
+        event_data["teacher_name"] = manual_teacher
+    if manual_instagram:
+        event_data["instagram_url"] = manual_instagram
+    if not manual_date or not manual_time:
+        st.warning("開催日と開始時間は必須です")
+        event_data = None
 
     if event_data:
         try:
