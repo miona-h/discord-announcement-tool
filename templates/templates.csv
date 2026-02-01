@@ -6,7 +6,7 @@ event_type,template
 今回の講師
 ーーーーーーーーーーーーーーーーーー
 ### {{genre}}
-### 【{{teacher_name}}】講師
+### 講師：{{teacher_name}}
 {{instagram_url}}
 ーーーーーーーーーーーーーーーーーー
 
@@ -45,7 +45,7 @@ Zoomの表示名のご変更をお願いいたします！お名前＋現役生�
 # まもなくジャンル特化グルコンが始まります🌈
 
 ### {{genre}}
-### {{teacher_name}}
+### 講師：{{teacher_name}}
 {{instagram_url}}
 
 ▼以下のリンクからご参加ください▼
@@ -66,7 +66,7 @@ Zoomの表示名のご変更をお願いいたします！
 
 今回のゲスト
 ーーーーーーーーーーーーーーーーーー
-## {{teacher_name}}さん
+## {{teacher_name}}
 {{instagram_url}}
 ーーーーーーーーーーーーーーーーーー
 
@@ -97,7 +97,7 @@ Zoomの表示名のご変更をお願いいたします！
 
 今回のゲスト
 ーーーーーーーーーーーーーーーーーー
-## 【{{teacher_name}}】講師
+## 講師：{{teacher_name}}
 {{instagram_url}}
 ーーーーーーーーーーーーーーーーーー
 
