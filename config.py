@@ -12,6 +12,10 @@ TEMPLATES_CSV_PATH = os.path.join(_CONFIG_DIR, "templates", "templates.csv")
 # 出力ディレクトリ
 OUTPUT_DIR = "output"
 
+# カレンダー取り込み時に除外する予定のタイトル（部分一致で除外）
+# 例: "週報提出" を含む予定は告知文生成・月全体案内の対象にしない
+CALENDAR_EXCLUDE_TITLES = ["週報提出"]
+
 # 日付フォーマット
 DATE_FORMAT = "%Y年%m月%d日"
 TIME_FORMAT = "%H:%M"

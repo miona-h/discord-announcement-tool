@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from parse_calendar import parse_event_name
 from generate_announcement import AnnouncementGenerator
 from monthly_overview import build_monthly_overview
+from config import CALENDAR_EXCLUDE_TITLES
 
 # Googleカレンダー連携（オプション）
 try:
@@ -212,10 +213,14 @@ if GOOGLE_API_AVAILABLE:
                         )
                         event_data_list = []
                         for ev in events:
-                            if ev.get("summary"):
-                                ed = api_event_to_event_data(ev, parse_event_name)
-                                ed["_id"] = ev.get("id", "")
-                                event_data_list.append(ed)
+                            summary = (ev.get("summary") or "").strip()
+                            if not summary:
+                                continue
+                            if any(exc in summary for exc in CALENDAR_EXCLUDE_TITLES):
+                                continue
+                            ed = api_event_to_event_data(ev, parse_event_name)
+                            ed["_id"] = ev.get("id", "")
+                            event_data_list.append(ed)
                         st.session_state["calendar_events"] = event_data_list
                     except Exception as e:
                         st.error(f"予定の取得に失敗しました: {e}")
