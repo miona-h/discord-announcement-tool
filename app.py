@@ -24,6 +24,7 @@ try:
         credentials_to_dict,
         dict_to_credentials,
         refresh_credentials_if_needed,
+        fetch_calendar_list,
         fetch_upcoming_events,
         api_event_to_event_data,
     )
@@ -39,6 +40,59 @@ st.set_page_config(
 
 st.title("📢 Discord告知文 自動生成ツール")
 st.caption("SnsClubオンラインイベント用の告知文章を生成します")
+
+
+def _get_channel_name(event_type: str) -> str:
+    """イベント種別からチャンネル名を返す"""
+    if not event_type:
+        return "交流会のお知らせ"
+    if "万垢生限定オン会" in event_type or "万垢" in event_type:
+        return "万垢お知らせチャンネル"
+    if "ジャンル特化グルコン" in event_type:
+        return "ジャンル特化グルコンのお知らせ"
+    if "講師対談" in event_type or "生徒対談" in event_type or "オン会" in event_type:
+        return "交流会のお知らせ"
+    return "交流会のお知らせ"
+
+
+def _get_post_date_time(event_type: str, event_date: str, event_time: str):
+    """
+    事前告知＝前日18:00固定、まもなく開始＝当日開始5分前 を返す。
+    戻り値: (日付文字列 "M/D", 時間文字列 "HH:MM")
+    """
+    from datetime import datetime, timedelta
+    year = datetime.now().year
+    post_date_str, post_time_str = str(event_date), str(event_time)
+    try:
+        parts = str(event_date).strip().split("/")
+        if len(parts) >= 2:
+            m, d = int(parts[0]), int(parts[1])
+        else:
+            return (event_date, "18:00" if "事前告知" in str(event_type) else event_time)
+        if "事前告知" in str(event_type):
+            event_dt = datetime(year, m, d)
+            prev = event_dt - timedelta(days=1)
+            post_date_str = f"{prev.month}/{prev.day}"
+            post_time_str = "18:00"
+        elif "間もなく開始" in str(event_type) or "まもなく" in str(event_type):
+            post_date_str = f"{m}/{d}"
+            t = str(event_time).strip()
+            if ":" in t:
+                parts_t = t.split(":")
+                h = int(parts_t[0])
+                mi = int(parts_t[1]) if len(parts_t) > 1 else 0
+                t_dt = datetime(year, m, d, h, mi) - timedelta(minutes=5)
+                post_time_str = f"{t_dt.hour:02d}:{t_dt.minute:02d}"
+            else:
+                post_time_str = t
+        else:
+            post_date_str = f"{m}/{d}"
+            post_time_str = "18:00" if "事前告知" in str(event_type) else str(event_time)
+    except Exception:
+        post_date_str = event_date
+        post_time_str = "18:00" if "事前告知" in str(event_type) else event_time
+    return (post_date_str, post_time_str)
+
 
 def _handle_oauth_callback():
     q = st.query_params
@@ -131,15 +185,40 @@ if GOOGLE_API_AVAILABLE:
                 del st.session_state["google_credentials"]
                 if "calendar_events" in st.session_state:
                     del st.session_state["calendar_events"]
+                if "calendar_list" in st.session_state:
+                    del st.session_state["calendar_list"]
                 st.rerun()
 
-            if st.button("📅 予定を取得"):
-                with st.spinner("予定を取得しています..."):
+            # カレンダー一覧を取得（初回のみ）
+            if "calendar_list" not in st.session_state:
+                with st.spinner("カレンダー一覧を取得しています..."):
                     try:
                         creds, updated = refresh_credentials_if_needed(creds)
                         if updated is not None:
                             st.session_state["google_credentials"] = updated
-                        events = fetch_upcoming_events(creds, max_results=30, days_ahead=14)
+                        cal_list = fetch_calendar_list(creds)
+                        st.session_state["calendar_list"] = cal_list if cal_list else [{"id": "primary", "summary": "メイン"}]
+                    except Exception:
+                        st.session_state["calendar_list"] = [{"id": "primary", "summary": "メイン"}]
+
+            cal_list = st.session_state.get("calendar_list", [{"id": "primary", "summary": "メイン"}])
+            cal_options = [f"{c.get('summary', '')} ({c.get('id', '')})" for c in cal_list]
+            cal_ids = [c.get("id", "primary") for c in cal_list]
+            cal_idx = st.selectbox("取得するカレンダーを選択", range(len(cal_list)), format_func=lambda i: cal_options[i])
+            selected_calendar_id = cal_ids[cal_idx] if cal_ids else "primary"
+
+            if st.button("📅 予定を取得（1ヶ月分）"):
+                with st.spinner("1ヶ月分の予定を取得しています..."):
+                    try:
+                        creds, updated = refresh_credentials_if_needed(creds)
+                        if updated is not None:
+                            st.session_state["google_credentials"] = updated
+                        events = fetch_upcoming_events(
+                            creds,
+                            calendar_id=selected_calendar_id,
+                            max_results=250,
+                            days_ahead=31,
+                        )
                         event_data_list = []
                         for ev in events:
                             if ev.get("summary"):
@@ -183,6 +262,59 @@ if GOOGLE_API_AVAILABLE:
                                 st.error("告知文の生成に失敗しました")
                     except Exception as e:
                         st.error(f"エラー: {e}")
+
+                st.divider()
+                st.markdown("**1ヶ月分を一括生成してスプレッドシート用に出力**")
+                if st.button("📋 1ヶ月分の告知文を一括生成", type="primary", key="btn_bulk"):
+                    generator = AnnouncementGenerator()
+                    rows = []
+                    for ed in events_list:
+                        ev_copy = ed.copy()
+                        for k in ("_id", "_raw_summary", "_raw_description"):
+                            ev_copy.pop(k, None)
+                        event_type = ev_copy.get("event_type", "")
+                        post_date, post_time = _get_post_date_time(
+                            event_type, ev_copy.get("date", ""), ev_copy.get("time", "")
+                        )
+                        channel_name = _get_channel_name(event_type)
+                        is_valid = generator.validate_event_data(ev_copy)[0]
+                        if is_valid:
+                            ann = generator.generate(ev_copy) or ""
+                            msg = (ann or "").replace("\r", "\n")
+                            rows.append({
+                                "メッセージ": msg,
+                                "日付": post_date,
+                                "時間": post_time,
+                                "チャンネル名": channel_name,
+                            })
+                        else:
+                            rows.append({
+                                "メッセージ": "(テンプレートに合わないためスキップ)",
+                                "日付": post_date,
+                                "時間": post_time,
+                                "チャンネル名": channel_name,
+                            })
+                    if rows:
+                        import io
+                        import csv as csv_module
+                        st.success(f"{len(rows)}件の告知文を生成しました。")
+                        st.dataframe(rows, use_container_width=True, height=400, column_config={"メッセージ": st.column_config.TextColumn("メッセージ", width="large")})
+                        buf = io.StringIO()
+                        w = csv_module.writer(buf)
+                        w.writerow(["メッセージ", "日付", "時間", "チャンネル名"])
+                        for r in rows:
+                            w.writerow([r["メッセージ"], r["日付"], r["時間"], r["チャンネル名"]])
+                        csv_str = buf.getvalue()
+                        st.download_button(
+                            "📥 CSVをダウンロード（A=メッセージ, B=日付, C=時間, D=チャンネル名）",
+                            csv_str.encode("utf-8-sig"),
+                            file_name="告知文一覧.csv",
+                            mime="text/csv; charset=utf-8",
+                            key="dl_bulk_csv",
+                        )
+                        st.caption("💡 事前告知＝前日18:00・まもなく開始＝開始5分前。A列=メッセージ, B列=日付(投稿日), C列=時間(投稿時間), D列=チャンネル名。")
+                    else:
+                        st.warning("生成できる予定がありませんでした。")
     tab_idx += 1
 
 with tabs[tab_idx]:
@@ -216,7 +348,8 @@ with tabs[tab_idx]:
             [
                 "ジャンル特化グルコン（事前告知）",
                 "ジャンル特化グルコン（間もなく開始）",
-                "ジャンル特化グルコン（卒業生向け）",
+                "万垢生限定オン会（事前告知）",
+                "万垢生限定オン会（間もなく開始）",
                 "生徒対談（事前告知）",
                 "生徒対談（間もなく開始）",
                 "講師対談（事前告知）",
@@ -291,7 +424,7 @@ if st.button("📝 告知文を生成", type="primary", key="btn_generate"):
 st.divider()
 st.markdown("""
 **利用可能なテンプレート**
-- ジャンル特化グルコン（事前告知 / 間もなく開始 / 卒業生向け）
+- ジャンル特化グルコン（事前告知 / 間もなく開始）、万垢生限定オン会（事前告知 / 間もなく開始）
 - 生徒対談（事前告知 / 間もなく開始）
 - 講師対談（事前告知 / 間もなく開始）
 - オン会（事前告知 / 間もなく開始）
