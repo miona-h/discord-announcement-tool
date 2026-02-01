@@ -135,10 +135,31 @@ def get_calendar_service(credentials: "Credentials"):
     return build("calendar", "v3", credentials=credentials)
 
 
+def fetch_calendar_list(credentials: "Credentials") -> List[Dict]:
+    """
+    アクセス可能なカレンダー一覧を取得する。
+    戻り値: [{"id": "primary", "summary": "メイン"}, ...]
+    """
+    if not GOOGLE_API_AVAILABLE:
+        return []
+    try:
+        service = get_calendar_service(credentials)
+        if service is None:
+            return []
+        result = service.calendarList().list().execute()
+        items = result.get("items", [])
+        return [{"id": it.get("id", ""), "summary": it.get("summary", it.get("id", ""))} for it in items]
+    except HttpError as e:
+        raise e
+    except Exception:
+        return []
+
+
 def fetch_upcoming_events(
     credentials: "Credentials",
-    max_results: int = 20,
-    days_ahead: int = 14,
+    calendar_id: str = "primary",
+    max_results: int = 250,
+    days_ahead: int = 31,
 ) -> List[Dict]:
     if not GOOGLE_API_AVAILABLE:
         return []
@@ -153,7 +174,7 @@ def fetch_upcoming_events(
         events_result = (
             service.events()
             .list(
-                calendarId="primary",
+                calendarId=calendar_id,
                 timeMin=time_min,
                 timeMax=time_max,
                 maxResults=max_results,
