@@ -73,9 +73,10 @@ class AnnouncementGenerator:
             'ジャンル特化グルコン（間もなく開始）': ['genre', 'teacher_name', 'instagram_url'],
             '生徒対談（間もなく開始）': [], '講師対談（間もなく開始）': [],
             'オン会（間もなく開始）': [], 'オン会（事前告知）': [],
+            '万垢生限定オン会（事前告知）': [], '万垢生限定オン会（間もなく開始）': [],
         }
-        no_teacher_events = ['オン会（事前告知）', 'オン会（間もなく開始）']
-        if '（事前告知）' in event_type or '（卒業生向け）' in event_type:
+        no_teacher_events = ['オン会（事前告知）', 'オン会（間もなく開始）', '万垢生限定オン会（事前告知）', '万垢生限定オン会（間もなく開始）']
+        if '（事前告知）' in event_type:
             if has_fixed_zoom:
                 required_fields = basic_required + (['date'] if event_type in no_teacher_events else ['date', 'teacher_name'])
             else:
