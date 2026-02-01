@@ -302,8 +302,8 @@ if GOOGLE_API_AVAILABLE:
                                 rows.append({
                                     "メッセージ": "(テンプレートに合わないためスキップ)",
                                     "日付": post_date,
-                                    "時間": post_time,
-                                    "チャンネル名": channel_name,
+                                    "時間": "",
+                                    "チャンネル名": "",
                                 })
                     if rows:
                         import io
