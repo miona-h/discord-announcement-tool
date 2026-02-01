@@ -125,12 +125,15 @@ def _handle_oauth_callback():
 if GOOGLE_API_AVAILABLE:
     _handle_oauth_callback()
 
-tab_names = ["🔗 Googleカレンダーと連携", "📋 貼り付けで入力", "✏️ 手動入力"]
+tab_names = ["🔗 Googleカレンダーと連携", "📋 貼り付けで入力", "✏️ 手動入力", "📝 テンプレート管理"]
 if not GOOGLE_API_AVAILABLE:
-    tab_names = ["📋 貼り付けで入力", "✏️ 手動入力"]
+    tab_names = ["📋 貼り付けで入力", "✏️ 手動入力", "📝 テンプレート管理"]
 
 tabs = st.tabs(tab_names)
 tab_idx = 0
+
+if "custom_templates" not in st.session_state:
+    st.session_state["custom_templates"] = {}
 
 if GOOGLE_API_AVAILABLE:
     with tabs[tab_idx]:
@@ -242,7 +245,7 @@ if GOOGLE_API_AVAILABLE:
                     for k in ("_id", "_raw_summary", "_raw_description"):
                         ed.pop(k, None)
                     try:
-                        generator = AnnouncementGenerator()
+                        generator = AnnouncementGenerator(templates_override=st.session_state.get("custom_templates", {}))
                         is_valid, errors = generator.validate_event_data(ed)
                         if not is_valid:
                             st.warning("入力情報に不備があります（手動で補完するか、貼り付け入力をお試しください）")
@@ -267,7 +270,7 @@ if GOOGLE_API_AVAILABLE:
                 st.divider()
                 st.markdown("**1ヶ月分を一括生成してスプレッドシート用に出力**")
                 if st.button("📋 1ヶ月分の告知文を一括生成", type="primary", key="btn_bulk"):
-                    generator = AnnouncementGenerator()
+                    generator = AnnouncementGenerator(templates_override=st.session_state.get("custom_templates", {}))
                     rows = []
                     for ed in events_list:
                         ev_copy = ed.copy()
@@ -379,22 +382,20 @@ tab_idx += 1
 
 with tabs[tab_idx]:
     st.markdown("**イベント情報を手動で入力**")
+    _gen = AnnouncementGenerator(templates_override=st.session_state.get("custom_templates", {}))
+    _event_type_options = sorted(_gen.templates.keys()) or [
+                "ジャンル特化グルコン（事前告知）", "ジャンル特化グルコン（間もなく開始）",
+                "万垢生限定オン会（事前告知）", "万垢生限定オン会（間もなく開始）",
+                "生徒対談（事前告知）", "生徒対談（間もなく開始）",
+                "講師対談（事前告知）", "講師対談（間もなく開始）",
+                "オン会（事前告知）", "オン会（間もなく開始）",
+            ]
     col1, col2 = st.columns(2)
     with col1:
         manual_event_type = st.selectbox(
             "イベント種別",
-            [
-                "ジャンル特化グルコン（事前告知）",
-                "ジャンル特化グルコン（間もなく開始）",
-                "万垢生限定オン会（事前告知）",
-                "万垢生限定オン会（間もなく開始）",
-                "生徒対談（事前告知）",
-                "生徒対談（間もなく開始）",
-                "講師対談（事前告知）",
-                "講師対談（間もなく開始）",
-                "オン会（事前告知）",
-                "オン会（間もなく開始）",
-            ],
+            _event_type_options,
+            format_func=lambda x: x + " ※追加" if x in st.session_state.get("custom_templates", {}) else x,
         )
         manual_date = st.text_input("開催日", placeholder="例: 1/31")
         manual_time = st.text_input("開始時間", placeholder="例: 12:00")
@@ -402,6 +403,52 @@ with tabs[tab_idx]:
         manual_genre = st.text_input("ジャンル（グルコンの場合）", placeholder="例: レシピジャンル")
         manual_teacher = st.text_input("講師名", placeholder="例: よだれ夫婦")
         manual_instagram = st.text_input("Instagramリンク", placeholder="https://www.instagram.com/...")
+
+tab_idx += 1
+with tabs[tab_idx]:
+    st.markdown("**📝 テンプレートの追加・編集**")
+    st.caption("特別講義など、新しいイベント種別のテンプレートを追加できます。追加したテンプレートはこのセッション中のみ有効です。永続化する場合は「CSVでダウンロード」してリポジトリの templates/templates.csv に反映してください。")
+    custom = st.session_state.get("custom_templates", {})
+
+    st.subheader("テンプレートを追加")
+    with st.form("add_template_form", clear_on_submit=True):
+        new_event_type = st.text_input("イベント種別名", placeholder="例: 特別講義（事前告知）")
+        new_template = st.text_area("テンプレート本文", placeholder="@everyone\n\n## 明日{{date}}の{{time}}より特別講義が開催されます...\n\n利用可能な変数: {{date}}, {{time}}, {{teacher_name}}, {{instagram_url}}, {{zoom_url}}, {{genre}} など", height=200)
+        if st.form_submit_button("追加"):
+            if new_event_type and new_template:
+                custom[new_event_type.strip()] = new_template.strip()
+                st.session_state["custom_templates"] = custom
+                st.success(f"「{new_event_type.strip()}」を追加しました。")
+                st.rerun()
+            else:
+                st.warning("イベント種別名とテンプレート本文を入力してください。")
+
+    st.subheader("追加したテンプレート一覧")
+    if custom:
+        for i, (event_type, body) in enumerate(list(custom.items())):
+            with st.expander(f"**{event_type}**", expanded=False):
+                st.text_area("本文", body, height=150, key=f"custom_preview_{i}", disabled=True)
+                if st.button("削除", key=f"del_custom_{i}"):
+                    del custom[event_type]
+                    st.session_state["custom_templates"] = custom
+                    st.rerun()
+    else:
+        st.info("追加したテンプレートはここに表示されます。")
+
+    st.subheader("CSVでダウンロード")
+    base_gen = AnnouncementGenerator()
+    all_templates = {**base_gen.templates, **st.session_state.get("custom_templates", {})}
+    if all_templates:
+        import io
+        import csv as csv_module
+        buf = io.StringIO()
+        w = csv_module.writer(buf)
+        w.writerow(["event_type", "template"])
+        for et, tmpl in sorted(all_templates.items()):
+            w.writerow([et, tmpl])
+        csv_bytes = buf.getvalue().encode("utf-8-sig")
+        st.download_button("現在のテンプレート一式をCSVでダウンロード", csv_bytes, file_name="templates.csv", mime="text/csv; charset=utf-8", key="dl_templates_csv")
+        st.caption("ダウンロードしたCSVを templates/templates.csv に置き換えると、次回以降もその内容がデフォルトになります。")
 
 if st.button("📝 告知文を生成", type="primary", key="btn_generate"):
     event_data = None
@@ -435,7 +482,7 @@ if st.button("📝 告知文を生成", type="primary", key="btn_generate"):
 
     if event_data:
         try:
-            generator = AnnouncementGenerator()
+            generator = AnnouncementGenerator(templates_override=st.session_state.get("custom_templates", {}))
             is_valid, errors = generator.validate_event_data(event_data)
             if not is_valid:
                 st.warning("入力情報に不備があります")
@@ -468,4 +515,5 @@ st.markdown("""
 - 講師対談（事前告知 / 間もなく開始）
 - オン会（事前告知 / 間もなく開始）
 - 月全体の案内文（Googleカレンダー連携タブで「月全体の案内文を生成」）
+- **テンプレート管理**タブで特別講義など新しい種別を追加できます
 """)

@@ -15,9 +15,11 @@ import config
 class AnnouncementGenerator:
     """告知文章生成クラス"""
     
-    def __init__(self, templates_path: str = None):
+    def __init__(self, templates_path: str = None, templates_override: Optional[Dict[str, str]] = None):
         self.templates_path = templates_path or config.TEMPLATES_CSV_PATH
-        self.templates = self._load_templates()
+        base = self._load_templates()
+        override = templates_override or {}
+        self.templates = {**base, **override}
     
     def _load_templates(self) -> Dict[str, str]:
         templates = {}
