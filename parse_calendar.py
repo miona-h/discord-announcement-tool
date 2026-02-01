@@ -102,7 +102,7 @@ def parse_calendar_text(text: str) -> Dict:
         if "instagram.com" in line.lower():
             # Zoomリンクの手前で区切り、InstagramのURLのみ抽出
             head = line.split("Zoomリンク")[0].split("Zoom ")[0].strip()
-            match = re.search(r'https://www\.instagram\.com/[^\s<>"/]+', head)
+            match = re.search(r'https?://(?:www\.)?instagram\.com/[^\s<>"/]+', head, re.I)
             if match:
                 result["instagram_url"] = match.group(0).rstrip("/").rstrip(")")
             break

@@ -65,11 +65,17 @@ def _format_date_short(date_str: str, time_str: str, year: int) -> str:
         return f"{date_str} {time_str}～"
 
 
+# 絵文字除去用: 絵文字ブロック + ZWJ・♀♂・異体字選択子（🏃‍♀️等の続き字を残さない）
+_EMOJI_STRIP_RE = re.compile(
+    r"^[\s\U0001F300-\U0001F9FF\u200D\u2640\u2642\uFE0F]+"
+)
+
+
 def _genre_base(genre: str) -> str:
     """絵文字・ジャンル接尾を除いたベース名。育児・子育ては「育児」に統一"""
     if not genre:
         return ""
-    g = re.sub(r"^[\s\U0001F300-\U0001F9FF]+", "", str(genre)).replace("ジャンル", "").strip()
+    g = _EMOJI_STRIP_RE.sub("", str(genre)).replace("ジャンル", "").strip()
     return GENRE_NORMALIZE.get(g, g) or g
 
 
@@ -193,7 +199,7 @@ def build_monthly_overview(events: List[Dict[str, Any]], month_str: str) -> str:
         genre_order: List[str] = []  # 最初に出た順を保持（育児・子育ては「育児」に統一）
         for ev in genre_events:
             g = ev.get("genre", "") or "その他"
-            g_key = _genre_base(g) or re.sub(r"^[\s\U0001F300-\U0001F9FF]+", "", str(g)).replace("ジャンル", "").strip()
+            g_key = _genre_base(g) or _EMOJI_STRIP_RE.sub("", str(g)).replace("ジャンル", "").strip()
             if not g_key:
                 g_key = "その他"
             if g_key not in by_genre:

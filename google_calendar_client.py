@@ -200,12 +200,12 @@ def _extract_instagram_from_description(description: str) -> str:
         if sep in description:
             head = description.split(sep)[0]
             break
-    # instagram.com のURLのみ（空白・タグ・Zoomで止める）
-    match = re.search(r"https://www\.instagram\.com/[^\s<>\"'/]+", head)
+    # instagram.com のURLのみ（www あり/なし両対応。空白・タグ・Zoomで止める）
+    match = re.search(r"https?://(?:www\.)?instagram\.com/[^\s<>\"'/]+", head, re.I)
     if match:
         url = match.group(0).rstrip("/").rstrip(")")
         return url
-    match = re.search(r"Instagram[リンク：:\s]*(https://www\.instagram\.com/[^\s<>\"'/]+)", head, re.I)
+    match = re.search(r"Instagram[リンク：:\s]*(https?://(?:www\.)?instagram\.com/[^\s<>\"'/]+)", head, re.I)
     if match:
         return match.group(1).strip().rstrip("/").rstrip(")")
     return ""
