@@ -88,3 +88,4 @@ class AnnouncementGenerator:
             if field not in event_data or not str(event_data[field]).strip():
                 errors.append(f"必須項目 '{field}' が不足しています")
         return len(errors) == 0, errors
+        
