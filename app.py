@@ -4,18 +4,21 @@ Discordオンラインイベント配信文章 自動生成ツール - Web版
 
 使い方:
     streamlit run app.py
+
+    または
+
+    python -m streamlit run app.py
 """
 
 import streamlit as st
 import sys
 import os
 
+# プロジェクトルートをパスに追加
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from parse_calendar import parse_event_name
+from parse_calendar import parse_calendar_text, parse_event_name
 from generate_announcement import AnnouncementGenerator
-from monthly_overview import build_monthly_overview
-from config import CALENDAR_EXCLUDE_TITLES
 
 # Googleカレンダー連携（オプション）
 try:
@@ -96,6 +99,7 @@ def _get_post_date_time(event_type: str, event_date: str, event_time: str):
     return (post_date_str, post_time_str)
 
 
+# クエリパラメータでOAuthコールバック（code）を処理
 def _handle_oauth_callback():
     q = st.query_params
     code = q.get("code")
@@ -126,16 +130,15 @@ def _handle_oauth_callback():
 if GOOGLE_API_AVAILABLE:
     _handle_oauth_callback()
 
-tab_names = ["🔗 Googleカレンダーと連携", "✏️ 手動入力", "📝 テンプレート管理"]
+# タブ：Google連携 / 貼り付け / 手動入力
+tab_names = ["🔗 Googleカレンダーと連携", "📋 貼り付けで入力", "✏️ 手動入力"]
 if not GOOGLE_API_AVAILABLE:
-    tab_names = ["✏️ 手動入力", "📝 テンプレート管理"]
+    tab_names = ["📋 貼り付けで入力", "✏️ 手動入力"]
 
 tabs = st.tabs(tab_names)
 tab_idx = 0
 
-if "custom_templates" not in st.session_state:
-    st.session_state["custom_templates"] = {}
-
+# --- Googleカレンダーと連携タブ ---
 if GOOGLE_API_AVAILABLE:
     with tabs[tab_idx]:
         redirect_uri = os.environ.get("REDIRECT_URI") or (
@@ -159,6 +162,19 @@ if GOOGLE_API_AVAILABLE:
                     unsafe_allow_html=True,
                 )
                 st.caption("クリックしてGoogleでログインし、許可するとこのページに戻り「連携済み」と表示されます。")
+                # 設定確認（redirect_uri_mismatch の診断用）
+                with st.expander("🔧 redirect_uri_mismatch が出る場合の確認"):
+                    st.code(redirect_uri, language=None)
+                    st.markdown("""
+**上記のURLが以下と完全に一致しているか確認してください：**
+
+1. **ブラウザのアドレスバー**：今開いているこのページのURL（`https://〇〇〇.streamlit.app`）
+2. **Google Cloud**：認証情報 → OAuthクライアントID → 承認済みのリダイレクトURI
+3. **Streamlit Secrets**：`REDIRECT_URI` の値
+
+`http://localhost:8501` と表示されている場合、Streamlit Cloud の **Settings → Secrets** で
+`REDIRECT_URI = "https://あなたのアプリURL.streamlit.app"` を追加してください。
+                    """)
             else:
                 st.info("Google連携を使うには、管理者がGoogle CloudでOAuth設定を行う必要があります。")
         else:
@@ -213,14 +229,10 @@ if GOOGLE_API_AVAILABLE:
                         )
                         event_data_list = []
                         for ev in events:
-                            summary = (ev.get("summary") or "").strip()
-                            if not summary:
-                                continue
-                            if any(exc in summary for exc in CALENDAR_EXCLUDE_TITLES):
-                                continue
-                            ed = api_event_to_event_data(ev, parse_event_name)
-                            ed["_id"] = ev.get("id", "")
-                            event_data_list.append(ed)
+                            if ev.get("summary"):
+                                ed = api_event_to_event_data(ev, parse_event_name)
+                                ed["_id"] = ev.get("id", "")
+                                event_data_list.append(ed)
                         st.session_state["calendar_events"] = event_data_list
                     except Exception as e:
                         st.error(f"予定の取得に失敗しました: {e}")
@@ -237,10 +249,10 @@ if GOOGLE_API_AVAILABLE:
                     for k in ("_id", "_raw_summary", "_raw_description"):
                         ed.pop(k, None)
                     try:
-                        generator = AnnouncementGenerator(templates_override=st.session_state.get("custom_templates", {}))
+                        generator = AnnouncementGenerator()
                         is_valid, errors = generator.validate_event_data(ed)
                         if not is_valid:
-                            st.warning("入力情報に不備があります（手動入力タブで補完してください）")
+                            st.warning("入力情報に不備があります（手動で補完するか、貼り付け入力をお試しください）")
                             for err in errors:
                                 st.write(f"• {err}")
                         else:
@@ -262,45 +274,34 @@ if GOOGLE_API_AVAILABLE:
                 st.divider()
                 st.markdown("**1ヶ月分を一括生成してスプレッドシート用に出力**")
                 if st.button("📋 1ヶ月分の告知文を一括生成", type="primary", key="btn_bulk"):
-                    generator = AnnouncementGenerator(templates_override=st.session_state.get("custom_templates", {}))
+                    generator = AnnouncementGenerator()
                     rows = []
                     for ed in events_list:
                         ev_copy = ed.copy()
                         for k in ("_id", "_raw_summary", "_raw_description"):
                             ev_copy.pop(k, None)
                         event_type = ev_copy.get("event_type", "")
-                        # 1件の予定につき「事前告知」と「まもなく開始」の2行を出力（全日程に適用）
-                        for is_soon in (False, True):
-                            if is_soon:
-                                if "（事前告知）" not in event_type:
-                                    continue
-                                ev_row = ev_copy.copy()
-                                # 全角括弧で統一（事前告知→間もなく開始）
-                                ev_row["event_type"] = event_type.replace("（事前告知）", "（間もなく開始）")
-                            else:
-                                ev_row = ev_copy
-                            row_type = ev_row.get("event_type", "")
-                            post_date, post_time = _get_post_date_time(
-                                row_type, ev_row.get("date", ""), ev_row.get("time", "")
-                            )
-                            channel_name = _get_channel_name(row_type)
-                            is_valid = generator.validate_event_data(ev_row)[0]
-                            if is_valid:
-                                ann = generator.generate(ev_row) or ""
-                                msg = (ann or "").replace("\r", "\n")
-                                rows.append({
-                                    "メッセージ": msg,
-                                    "日付": post_date,
-                                    "時間": post_time,
-                                    "チャンネル名": channel_name,
-                                })
-                            else:
-                                rows.append({
-                                    "メッセージ": "(テンプレートに合わないためスキップ)",
-                                    "日付": post_date,
-                                    "時間": "",
-                                    "チャンネル名": "",
-                                })
+                        post_date, post_time = _get_post_date_time(
+                            event_type, ev_copy.get("date", ""), ev_copy.get("time", "")
+                        )
+                        channel_name = _get_channel_name(event_type)
+                        is_valid = generator.validate_event_data(ev_copy)[0]
+                        if is_valid:
+                            ann = generator.generate(ev_copy) or ""
+                            msg = (ann or "").replace("\r", "\n")
+                            rows.append({
+                                "メッセージ": msg,
+                                "日付": post_date,
+                                "時間": post_time,
+                                "チャンネル名": channel_name,
+                            })
+                        else:
+                            rows.append({
+                                "メッセージ": "(テンプレートに合わないためスキップ)",
+                                "日付": post_date,
+                                "時間": post_time,
+                                "チャンネル名": channel_name,
+                            })
                     if rows:
                         import io
                         import csv as csv_module
@@ -322,159 +323,110 @@ if GOOGLE_API_AVAILABLE:
                         st.caption("💡 事前告知＝前日18:00・まもなく開始＝開始5分前。A列=メッセージ, B列=日付(投稿日), C列=時間(投稿時間), D列=チャンネル名。")
                     else:
                         st.warning("生成できる予定がありませんでした。")
-
-                st.divider()
-                st.markdown("**月全体の案内文を生成**")
-                if st.button("📅 月全体の案内文を生成", type="primary", key="btn_monthly"):
-                    ev_clean = [ed.copy() for ed in events_list]
-                    for ed in ev_clean:
-                        for k in ("_id", "_raw_summary", "_raw_description"):
-                            ed.pop(k, None)
-                    try:
-                        from datetime import datetime as dt
-                        if ev_clean and ev_clean[0].get("date"):
-                            parts = str(ev_clean[0]["date"]).strip().split("/")
-                            month_str = f"{int(parts[0])}月" if parts else f"{dt.now().month}月"
-                        else:
-                            month_str = f"{dt.now().month}月"
-                        overview = build_monthly_overview(ev_clean, month_str)
-                        st.success("月全体の案内文を生成しました！")
-                        st.text_area(
-                            "月全体の案内文（コピーしてDiscordに貼り付けてください）",
-                            overview,
-                            height=500,
-                            key="monthly_overview_output",
-                        )
-                        st.caption("💡 特別講義→講師対談→生徒対談→ジャンル特化グルコン（ジャンルごと・日付順）")
-                    except Exception as e:
-                        st.error(f"エラー: {e}")
     tab_idx += 1
 
+# --- 貼り付けで入力タブ ---
+with tabs[tab_idx]:
+    st.markdown("""
+    **Googleカレンダーの予定をコピー＆ペーストしてください**
+    
+    以下のような形式で入力：
+    ```
+    【ジャンル特化グルコン】よだれ夫婦講師（レシピジャンル）
+    1月 31日 (土曜日)⋅午後12:00～1:00
+    Instagramリンク：https://www.instagram.com/yurina_diet.recipe
+    Zoomリンク：https://us06web.zoom.us/j/...
+    ミーティング ID: 867 8339 1679
+    パスコード: 0000
+    ```
+    """)
+    calendar_text = st.text_area(
+        "カレンダー情報を貼り付け",
+        height=200,
+        placeholder="ここにGoogleカレンダーの予定を貼り付けてください...",
+        label_visibility="collapsed",
+    )
+tab_idx += 1
+
+# --- 手動入力タブ ---
 with tabs[tab_idx]:
     st.markdown("**イベント情報を手動で入力**")
-    _gen = AnnouncementGenerator(templates_override=st.session_state.get("custom_templates", {}))
-    _event_type_options = sorted(_gen.templates.keys()) or [
-                "ジャンル特化グルコン（事前告知）", "ジャンル特化グルコン（間もなく開始）",
-                "万垢生限定オン会（事前告知）", "万垢生限定オン会（間もなく開始）",
-                "生徒対談（事前告知）", "生徒対談（間もなく開始）",
-                "講師対談（事前告知）", "講師対談（間もなく開始）",
-                "オン会（事前告知）", "オン会（間もなく開始）",
-            ]
     col1, col2 = st.columns(2)
+    
     with col1:
         manual_event_type = st.selectbox(
             "イベント種別",
-            _event_type_options,
-            format_func=lambda x: x + " ※追加" if x in st.session_state.get("custom_templates", {}) else x,
+            [
+                "ジャンル特化グルコン（事前告知）",
+                "ジャンル特化グルコン（間もなく開始）",
+                "万垢生限定オン会（事前告知）",
+                "万垢生限定オン会（間もなく開始）",
+                "生徒対談（事前告知）",
+                "生徒対談（間もなく開始）",
+                "講師対談（事前告知）",
+                "講師対談（間もなく開始）",
+                "オン会（事前告知）",
+                "オン会（間もなく開始）",
+            ],
         )
         manual_date = st.text_input("開催日", placeholder="例: 1/31")
         manual_time = st.text_input("開始時間", placeholder="例: 12:00")
+    
     with col2:
         manual_genre = st.text_input("ジャンル（グルコンの場合）", placeholder="例: レシピジャンル")
-        manual_teacher = st.text_input("講師名", placeholder="例: アカウント名")
+        manual_teacher = st.text_input("講師名", placeholder="例: よだれ夫婦")
         manual_instagram = st.text_input("Instagramリンク", placeholder="https://www.instagram.com/...")
 
-tab_idx += 1
-with tabs[tab_idx]:
-    st.markdown("**📝 テンプレートの追加・編集**")
-    st.caption("現在のテンプレートを一覧表示し、編集できます。追加・編集した内容はこのセッション中のみ有効です。永続化する場合は「CSVでダウンロード」して templates/templates.csv に反映してください。")
-    custom = st.session_state.get("custom_templates", {})
-    base_gen = AnnouncementGenerator()
-    all_templates = {**base_gen.templates, **custom}
-
-    st.subheader("現在使用中のテンプレート一覧")
-    if "editing_template" not in st.session_state:
-        st.session_state["editing_template"] = None
-    editing = st.session_state.get("editing_template")
-
-    if all_templates:
-        for i, (event_type, body) in enumerate(sorted(all_templates.items())):
-            is_custom = event_type in custom
-            with st.expander(f"**{event_type}**" + (" ※編集済み" if is_custom else ""), expanded=(editing == event_type)):
-                if editing == event_type:
-                    new_body = st.text_area("テンプレート本文を編集", body, height=250, key=f"edit_body_{i}")
-                    col1, col2, _ = st.columns([1, 1, 2])
-                    with col1:
-                        if st.button("保存", key=f"save_edit_{i}"):
-                            custom[event_type] = new_body
-                            st.session_state["custom_templates"] = custom
-                            st.session_state["editing_template"] = None
-                            st.rerun()
-                    with col2:
-                        if st.button("キャンセル", key=f"cancel_edit_{i}"):
-                            st.session_state["editing_template"] = None
-                            st.rerun()
-                    if is_custom:
-                        if st.button("このテンプレートを削除", key=f"del_edit_{i}"):
-                            del custom[event_type]
-                            st.session_state["custom_templates"] = custom
-                            st.session_state["editing_template"] = None
-                            st.rerun()
-                else:
-                    st.text_area("本文", body[:500] + ("..." if len(body) > 500 else ""), height=120, key=f"preview_{i}", disabled=True)
-                    if st.button("編集", key=f"btn_edit_{i}"):
-                        st.session_state["editing_template"] = event_type
-                        st.rerun()
-                    if is_custom:
-                        if st.button("デフォルトに戻す", key=f"reset_{i}"):
-                            del custom[event_type]
-                            st.session_state["custom_templates"] = custom
-                            st.rerun()
-    else:
-        st.info("テンプレートがありません。下の「テンプレートを追加」で追加してください。")
-
-    st.subheader("テンプレートを追加")
-    with st.form("add_template_form", clear_on_submit=True):
-        new_event_type = st.text_input("イベント種別名", placeholder="例: 特別講義（事前告知）")
-        new_template = st.text_area("テンプレート本文", placeholder="@everyone\n\n## 明日{{date}}の{{time}}より特別講義が開催されます...\n\n利用可能な変数: {{date}}, {{time}}, {{teacher_name}}, {{instagram_url}}, {{zoom_url}}, {{genre}} など", height=200)
-        if st.form_submit_button("追加"):
-            if new_event_type and new_template:
-                custom[new_event_type.strip()] = new_template.strip()
-                st.session_state["custom_templates"] = custom
-                st.success(f"「{new_event_type.strip()}」を追加しました。")
-                st.rerun()
-            else:
-                st.warning("イベント種別名とテンプレート本文を入力してください。")
-
-    st.subheader("CSVでダウンロード")
-    if all_templates:
-        import io
-        import csv as csv_module
-        buf = io.StringIO()
-        w = csv_module.writer(buf)
-        w.writerow(["event_type", "template"])
-        for et, tmpl in sorted(all_templates.items()):
-            w.writerow([et, tmpl])
-        csv_bytes = buf.getvalue().encode("utf-8-sig")
-        st.download_button("現在のテンプレート一式をCSVでダウンロード", csv_bytes, file_name="templates.csv", mime="text/csv; charset=utf-8", key="dl_templates_csv")
-        st.caption("ダウンロードしたCSVを templates/templates.csv に置き換えると、次回以降もその内容がデフォルトになります。")
-
+# 生成ボタン（貼り付け・手動入力タブ用）
 if st.button("📝 告知文を生成", type="primary", key="btn_generate"):
-    event_data = {
-        "event_type": manual_event_type,
-        "date": manual_date,
-        "time": manual_time,
-    }
-    if manual_genre:
-        event_data["genre"] = manual_genre
-    if manual_teacher:
-        event_data["teacher_name"] = manual_teacher
-    if manual_instagram:
-        event_data["instagram_url"] = manual_instagram
-    if not manual_date or not manual_time:
-        st.warning("開催日と開始時間は必須です")
-        event_data = None
-
+    event_data = None
+    
+    if calendar_text.strip():
+        # カレンダーからパース
+        try:
+            event_data = parse_calendar_text(calendar_text)
+            required = ['date', 'time', 'event_type']
+            missing = [f for f in required if f not in event_data]
+            
+            if missing:
+                st.warning(f"以下の情報が不足しています: {', '.join(missing)}")
+                st.json(event_data)
+                event_data = None
+        except Exception as e:
+            st.error(f"パースエラー: {e}")
+            event_data = None
+    else:
+        # 手動入力から作成
+        event_data = {
+            "event_type": manual_event_type,
+            "date": manual_date,
+            "time": manual_time,
+        }
+        
+        if manual_genre:
+            event_data["genre"] = manual_genre
+        if manual_teacher:
+            event_data["teacher_name"] = manual_teacher
+        if manual_instagram:
+            event_data["instagram_url"] = manual_instagram
+        
+        # 必須項目チェック
+        if not manual_date or not manual_time:
+            st.warning("開催日と開始時間は必須です")
+            event_data = None
+    
     if event_data:
         try:
-            generator = AnnouncementGenerator(templates_override=st.session_state.get("custom_templates", {}))
+            generator = AnnouncementGenerator()
             is_valid, errors = generator.validate_event_data(event_data)
+            
             if not is_valid:
                 st.warning("入力情報に不備があります")
                 for err in errors:
                     st.write(f"• {err}")
             else:
                 announcement = generator.generate(event_data)
+                
                 if announcement:
                     st.success("告知文を生成しました！")
                     st.text_area(
@@ -494,11 +446,8 @@ if st.button("📝 告知文を生成", type="primary", key="btn_generate"):
 st.divider()
 st.markdown("""
 **利用可能なテンプレート**
-- ジャンル特化グルコン（事前告知 / 間もなく開始）
-- 万垢生限定オン会（事前告知 / 間もなく開始）
+- ジャンル特化グルコン（事前告知 / 間もなく開始）、万垢生限定オン会（事前告知 / 間もなく開始）
 - 生徒対談（事前告知 / 間もなく開始）
 - 講師対談（事前告知 / 間もなく開始）
 - オン会（事前告知 / 間もなく開始）
-- 月全体の案内文（Googleカレンダー連携タブで「月全体の案内文を生成」）
-- **テンプレート管理**タブで特別講義など新しい種別を追加できます
 """)
