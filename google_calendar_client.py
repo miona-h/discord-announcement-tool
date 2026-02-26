@@ -6,10 +6,9 @@ GoogleカレンダーAPI連携モジュール
 """
 
 import re
-from datetime import datetime
+from datetime import datetime, date, timedelta, timezone
 from typing import Dict, List, Optional, Any
 
-# Google APIはオプション（未インストール時は連携タブを無効化）
 try:
     from google.oauth2.credentials import Credentials
     from google_auth_oauthlib.flow import Flow
@@ -25,7 +24,6 @@ SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
 
 
 def _get_flow(redirect_uri: str, client_id: str = None, client_secret: str = None):
-    """OAuth Flowを生成（client_id/secretは環境変数またはStreamlit secrets）"""
     if not GOOGLE_API_AVAILABLE:
         return None
     client_id = client_id or _get_client_id()
@@ -66,7 +64,6 @@ def _get_client_secret() -> Optional[str]:
 
 
 def get_authorization_url(redirect_uri: str) -> Optional[str]:
-    """認証URLを取得（「Googleでログイン」ボタン用）"""
     if not GOOGLE_API_AVAILABLE:
         return None
     flow = _get_flow(redirect_uri)
@@ -81,7 +78,6 @@ def get_authorization_url(redirect_uri: str) -> Optional[str]:
 
 
 def exchange_code_for_credentials(redirect_uri: str, code: str) -> Optional[Credentials]:
-    """認証コードをトークンに交換"""
     if not GOOGLE_API_AVAILABLE:
         return None
     flow = _get_flow(redirect_uri)
@@ -92,7 +88,6 @@ def exchange_code_for_credentials(redirect_uri: str, code: str) -> Optional[Cred
 
 
 def credentials_to_dict(creds: "Credentials") -> Dict:
-    """Credentialsを辞書に（session_state保存用）"""
     return {
         "token": creds.token,
         "refresh_token": getattr(creds, "refresh_token", None),
@@ -104,7 +99,6 @@ def credentials_to_dict(creds: "Credentials") -> Dict:
 
 
 def dict_to_credentials(d: Dict) -> Optional["Credentials"]:
-    """辞書からCredentialsを復元"""
     if not GOOGLE_API_AVAILABLE or not d:
         return None
     return Credentials(
@@ -136,7 +130,6 @@ def refresh_credentials_if_needed(creds: "Credentials") -> tuple:
 
 
 def get_calendar_service(credentials: "Credentials"):
-    """Calendar API サービスを取得"""
     if not GOOGLE_API_AVAILABLE:
         return None
     return build("calendar", "v3", credentials=credentials)
@@ -167,9 +160,12 @@ def fetch_upcoming_events(
     calendar_id: str = "primary",
     max_results: int = 250,
     days_ahead: int = 31,
+    start_date: Optional[date] = None,
 ) -> List[Dict]:
     """
-    今後 days_ahead 日以内の予定を取得
+    指定期間の予定を取得する。
+    start_date を指定した場合、その日の 0:00 UTC から days_ahead 日分を取得する。
+    指定しない場合は「今」から days_ahead 日分。
     """
     if not GOOGLE_API_AVAILABLE:
         return []
@@ -177,10 +173,16 @@ def fetch_upcoming_events(
         service = get_calendar_service(credentials)
         if service is None:
             return []
-        now = datetime.utcnow()
-        time_min = now.isoformat() + "Z"
-        from datetime import timedelta
-        time_max = (now + timedelta(days=days_ahead)).isoformat() + "Z"
+        now = datetime.now(timezone.utc)
+        if start_date is not None:
+            range_start = datetime(
+                start_date.year, start_date.month, start_date.day,
+                0, 0, 0, tzinfo=timezone.utc,
+            )
+        else:
+            range_start = now
+        time_min = range_start.isoformat().replace("+00:00", "Z")
+        time_max = (range_start + timedelta(days=days_ahead)).isoformat().replace("+00:00", "Z")
         events_result = (
             service.events()
             .list(
@@ -201,35 +203,56 @@ def fetch_upcoming_events(
 
 
 def _extract_instagram_from_description(description: str) -> str:
-    """説明文からInstagram URLを抽出"""
+    """InstagramのURLのみ抽出（Zoomリンクは含めない。Zoomリンクの手前で区切る）"""
     if not description:
         return ""
-    match = re.search(r"https://www\.instagram\.com/[^\s\)]+", description)
+    # Zoomリンク／Zoomの記述より手前だけを使う（InstagramとZoomが繋がっている場合対策）
+    head = description
+    for sep in ("Zoomリンク", "Zoomリンク：", "Zoomのリンク", "Zoom "):
+        if sep in description:
+            head = description.split(sep)[0]
+            break
+    # instagram.com のURLのみ（www あり/なし両対応。空白・タグ・Zoomで止める）
+    match = re.search(r"https?://(?:www\.)?instagram\.com/[^\s<>\"'/]+", head, re.I)
     if match:
-        return match.group(0).rstrip(")")
-    match = re.search(r"Instagram[リンク：:\s]*([^\s\)]+)", description, re.I)
+        url = match.group(0).rstrip("/").rstrip(")")
+        return url
+    match = re.search(r"Instagram[リンク：:\s]*(https?://(?:www\.)?instagram\.com/[^\s<>\"'/]+)", head, re.I)
     if match:
-        url = match.group(1).strip()
-        if "instagram.com" in url:
-            return url
+        return match.group(1).strip().rstrip("/").rstrip(")")
+    return ""
+
+
+def _extract_instagram_display_name(description: str, instagram_url: str = "") -> str:
+    """説明文のHTML <a href="instagram...">表示名</a> から表示名を抽出。リンクテキストがURLの場合は使わずユーザー名を返す"""
+    if description:
+        # <a ... href="...instagram...">表示名</a> の表示名部分を取得
+        match = re.search(r'<a[^>]*href="[^"]*instagram[^"]*"[^>]*>([^<]+)</a>', description, re.I)
+        if match:
+            text = match.group(1).strip()
+            # リンクテキストがURLそのもの（名前ではない）の場合は表示名として使わない
+            if not text or "instagram.com" in text or text.startswith("http"):
+                pass  # フォールバックへ
+            else:
+                return text
+    # プレーンテキストのみ、またはリンクがURLのとき：Instagram URL のユーザー名部分を返す
+    if instagram_url:
+        m = re.search(r"instagram\.com/([^/?\s]+)", instagram_url, re.I)
+        if m:
+            return m.group(1).strip()
     return ""
 
 
 def _format_date_time(start: Dict) -> tuple:
-    """
-    APIのstartから (date_str "M/D", time_str "HH:MM") を返す
-    """
     if "dateTime" in start:
         dt_str = start["dateTime"]
         try:
-            # RFC3339 例: 2024-01-31T12:00:00+09:00
             if "T" in dt_str:
                 dt = datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
                 return (f"{dt.month}/{dt.day}", f"{dt.hour:02d}:{dt.minute:02d}")
         except Exception:
             pass
     if "date" in start:
-        # 終日 例: 2024-01-31
         try:
             dt = datetime.strptime(start["date"], "%Y-%m-%d")
             return (f"{dt.month}/{dt.day}", "00:00")
@@ -239,9 +262,6 @@ def _format_date_time(start: Dict) -> tuple:
 
 
 def api_event_to_event_data(api_event: Dict, parse_event_name_fn) -> Dict[str, Any]:
-    """
-    Google Calendar API のイベント1件を、告知文生成用の event_data に変換
-    """
     summary = api_event.get("summary", "")
     description = api_event.get("description", "") or ""
     start = api_event.get("start", {})
@@ -261,7 +281,16 @@ def api_event_to_event_data(api_event: Dict, parse_event_name_fn) -> Dict[str, A
     else:
         event_data["instagram_url"] = event_data.get("instagram_url", "")
 
-    # API用の生データを保持（表示用）
+    # 講師名：予定名（タイトル）にある名前を優先。予定名にない場合のみ説明文の表示名またはInstagramのユーザー名を使う
+    if not event_data.get("teacher_name"):
+        display_name = _extract_instagram_display_name(description, instagram_url)
+        if display_name:
+            event_data["teacher_name"] = display_name
+        elif event_data.get("instagram_url"):
+            fallback = _extract_instagram_display_name("", event_data["instagram_url"])
+            if fallback:
+                event_data["teacher_name"] = fallback
+
     event_data["_raw_summary"] = summary
     event_data["_raw_description"] = description[:200] if description else ""
 
