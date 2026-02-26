@@ -294,22 +294,16 @@ if GOOGLE_API_AVAILABLE:
                             )
                             channel_name = _get_channel_name(row_type)
                             is_valid = generator.validate_event_data(ev_row)[0]
-                            if is_valid:
-                                ann = generator.generate(ev_row) or ""
-                                msg = (ann or "").replace("\r", "\n")
-                                rows.append({
-                                    "メッセージ": msg,
-                                    "日付": post_date,
-                                    "時間": post_time,
-                                    "チャンネル名": channel_name,
-                                })
-                            else:
-                                rows.append({
-                                    "メッセージ": "(テンプレートに合わないためスキップ)",
-                                    "日付": post_date,
-                                    "時間": "",
-                                    "チャンネル名": "",
-                                })
+                            if not is_valid:
+                                continue
+                            ann = generator.generate(ev_row) or ""
+                            msg = (ann or "").replace("\r", "\n")
+                            rows.append({
+                                "メッセージ": msg,
+                                "日付": post_date,
+                                "時間": post_time,
+                                "チャンネル名": channel_name,
+                            })
                     if rows:
                         import io
                         import csv as csv_module
