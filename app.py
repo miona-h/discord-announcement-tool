@@ -62,6 +62,14 @@ GOOGLE_SCOPE_LIST = [
 GOOGLE_SCOPE_STR = " ".join(GOOGLE_SCOPE_LIST)
 
 
+def _use_streamlit_oauth() -> bool:
+    if not STREAMLIT_OAUTH_AVAILABLE:
+        return False
+    if not hasattr(st, "secrets"):
+        return False
+    return bool(st.secrets.get("GOOGLE_CLIENT_ID") and st.secrets.get("GOOGLE_CLIENT_SECRET"))
+
+
 def _get_channel_name(event_type: str) -> str:
     """イベント種別からチャンネル名を返す"""
     if not event_type:
@@ -156,7 +164,7 @@ def _handle_oauth_callback():
     else:
         st.session_state["oauth_error"] = "トークンの取得に失敗しました。もう一度「Googleカレンダーと連携する」からやり直してください。"
 
-if GOOGLE_API_AVAILABLE:
+if GOOGLE_API_AVAILABLE and not _use_streamlit_oauth():
     _handle_oauth_callback()
 
 tab_names = ["🔗 Googleカレンダーと連携", "✏️ 手動入力", "📝 テンプレート管理"]
@@ -187,7 +195,7 @@ if GOOGLE_API_AVAILABLE:
         if "google_credentials" not in st.session_state:
             st.markdown("**Googleカレンダーと連携して、予定を自動で取り込みます**")
             oauth_linked = False
-            if STREAMLIT_OAUTH_AVAILABLE and client_id and client_secret:
+            if _use_streamlit_oauth() and client_id and client_secret:
                 try:
                     oauth2 = OAuth2Component(
                         client_id=client_id,
@@ -223,8 +231,8 @@ if GOOGLE_API_AVAILABLE:
                 except Exception as e:
                     st.session_state["oauth_error"] = f"streamlit-oauth連携エラー: {e}"
 
-            # フォールバック（従来フロー）
-            if not oauth_linked:
+            # フォールバック（従来フロー）は streamlit-oauth 未使用時のみ表示
+            if (not _use_streamlit_oauth()) and (not oauth_linked):
                 if auth_url:
                     st.markdown(
                         f'<a href="{auth_url}" style="display:inline-block;padding:0.5rem 1rem;'
