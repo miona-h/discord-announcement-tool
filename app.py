@@ -58,6 +58,7 @@ GOOGLE_SCOPE_LIST = [
     "email",
     "profile",
     "https://www.googleapis.com/auth/calendar.readonly",
+    "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
 ]
 GOOGLE_SCOPE_STR = " ".join(GOOGLE_SCOPE_LIST)
 
@@ -272,7 +273,8 @@ if GOOGLE_API_AVAILABLE:
                             st.session_state["google_credentials"] = updated
                         cal_list = fetch_calendar_list(creds)
                         st.session_state["calendar_list"] = cal_list if cal_list else [{"id": "primary", "summary": "メイン"}]
-                    except Exception:
+                    except Exception as e:
+                        st.warning(f"カレンダー一覧の取得でエラーが発生したため、メインカレンダーのみ表示します: {e}")
                         st.session_state["calendar_list"] = [{"id": "primary", "summary": "メイン"}]
 
             cal_list = st.session_state.get("calendar_list", [{"id": "primary", "summary": "メイン"}])

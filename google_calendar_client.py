@@ -20,7 +20,10 @@ except ImportError:
     GOOGLE_API_AVAILABLE = False
 
 
-SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
+SCOPES = [
+    "https://www.googleapis.com/auth/calendar.readonly",
+    "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+]
 
 
 def _get_flow(redirect_uri: str, client_id: str = None, client_secret: str = None):
