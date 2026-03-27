@@ -117,11 +117,17 @@ def _handle_oauth_callback():
         st.secrets.get("REDIRECT_URI") if hasattr(st, "secrets") else None
     ) or "http://localhost:8501"
     expected_state = st.session_state.get("oauth_state")
+    code_verifier = st.session_state.get("oauth_code_verifier")
     if expected_state and state and state != expected_state:
         st.session_state["oauth_error"] = "OAuthの検証に失敗しました。もう一度「Googleカレンダーと連携する」を押してください。"
         return
     try:
-        creds = exchange_code_for_credentials(redirect_uri, code, state=expected_state or state)
+        creds = exchange_code_for_credentials(
+            redirect_uri,
+            code,
+            state=expected_state or state,
+            code_verifier=code_verifier,
+        )
     except Exception as e:
         st.session_state["oauth_error"] = str(e)
         return
@@ -130,6 +136,8 @@ def _handle_oauth_callback():
         st.session_state["oauth_just_completed"] = True
         if "oauth_state" in st.session_state:
             del st.session_state["oauth_state"]
+        if "oauth_code_verifier" in st.session_state:
+            del st.session_state["oauth_code_verifier"]
         if "oauth_error" in st.session_state:
             del st.session_state["oauth_error"]
         # rerunしない＝このまま描画を続けて「連携済み」を表示（Streamlit Cloudでrerunするとセッションが消えて空白になるため）
@@ -156,8 +164,9 @@ if GOOGLE_API_AVAILABLE:
         auth_payload = get_authorization_url(redirect_uri)
         auth_url = None
         if auth_payload:
-            auth_url, oauth_state = auth_payload
+            auth_url, oauth_state, oauth_code_verifier = auth_payload
             st.session_state["oauth_state"] = oauth_state
+            st.session_state["oauth_code_verifier"] = oauth_code_verifier
 
         if "oauth_error" in st.session_state:
             st.error(st.session_state["oauth_error"])
