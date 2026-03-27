@@ -230,7 +230,19 @@ if GOOGLE_API_AVAILABLE:
                             oauth_linked = True
                             st.rerun()
                 except Exception as e:
-                    st.session_state["oauth_error"] = f"streamlit-oauth連携エラー: {e}"
+                    err_text = str(e)
+                    if "DOES NOT MATCH OR OUT OF DATE" in err_text:
+                        # 古いstate付きURLで戻った場合はクエリを捨てて再試行可能にする
+                        try:
+                            st.query_params.clear()
+                        except Exception:
+                            pass
+                        st.session_state["oauth_error"] = (
+                            "認証セッションが期限切れになりました。"
+                            " もう一度「Googleカレンダーと連携する」を押してください。"
+                        )
+                    else:
+                        st.session_state["oauth_error"] = f"streamlit-oauth連携エラー: {err_text}"
 
             # フォールバック（従来フロー）は streamlit-oauth 未使用時のみ表示
             if (not _use_streamlit_oauth()) and (not oauth_linked):
