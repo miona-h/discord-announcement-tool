@@ -57,8 +57,8 @@ GOOGLE_SCOPE_LIST = [
     "openid",
     "email",
     "profile",
+    "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/calendar.readonly",
-    "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
 ]
 GOOGLE_SCOPE_STR = " ".join(GOOGLE_SCOPE_LIST)
 
