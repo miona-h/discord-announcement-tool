@@ -102,8 +102,8 @@ class AnnouncementGenerator:
     def validate_event_data(self, event_data: Dict) -> tuple[bool, list[str]]:
         errors = []
         event_type = event_data.get('event_type', '').strip()
-        has_fixed_zoom = event_type in config.FIXED_ZOOM_INFO
-        basic_required = ['time', 'event_type'] if has_fixed_zoom else ['time', 'event_type', 'zoom_url']
+        # Zoom情報はテンプレート側に直接記載できるため、抽出値は必須にしない
+        basic_required = ['time', 'event_type']
         event_specific_required = {
             'ジャンル特化グルコン（間もなく開始）': ['genre', 'teacher_name', 'instagram_url'],
             '生徒対談（間もなく開始）': [], '講師対談（間もなく開始）': [],
@@ -112,10 +112,7 @@ class AnnouncementGenerator:
         }
         no_teacher_events = ['オン会（事前告知）', 'オン会（間もなく開始）', '万垢生限定オン会（事前告知）', '万垢生限定オン会（間もなく開始）']
         if '（事前告知）' in event_type:
-            if has_fixed_zoom:
-                required_fields = basic_required + (['date'] if event_type in no_teacher_events else ['date', 'teacher_name'])
-            else:
-                required_fields = basic_required + (['date', 'meeting_id', 'passcode'] if event_type in no_teacher_events else ['date', 'teacher_name', 'meeting_id', 'passcode'])
+            required_fields = basic_required + (['date'] if event_type in no_teacher_events else ['date', 'teacher_name'])
         elif event_type in event_specific_required:
             required_fields = basic_required + event_specific_required[event_type]
         else:
