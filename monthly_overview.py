@@ -155,13 +155,13 @@ def build_monthly_overview(events: List[Dict[str, Any]], month_str: str) -> str:
 
     # その他ジャンル（未分類イベントがある場合のみ、最上部に表示）
     if other:
-        lines.append("## その他ジャンル")
-        lines.append("")
-        for i, ev in enumerate(other, 1):
+        for ev in other:
             date_fmt = _format_date_short(ev.get("date", ""), ev.get("time", ""), year)
-            event_name = ev.get("event_name", "")
-            lines.append(f"{_num(i)}開催日：{date_fmt}")
-            lines.append(f"イベント名：{event_name}")
+            event_name = str(ev.get("event_name", "")).strip() or "イベント名未設定"
+            # 予定名がすでに【】で始まる場合は、その表記をそのまま見出しに使う。
+            heading = event_name if event_name.startswith("【") else f"【{event_name}】"
+            lines.append(f"## {heading}")
+            lines.append(f"開催日：{date_fmt}")
             lines.append("")
         lines.append("")
 
