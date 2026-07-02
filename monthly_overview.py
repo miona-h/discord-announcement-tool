@@ -107,7 +107,8 @@ def _num(i: int) -> str:
 def build_monthly_overview(events: List[Dict[str, Any]], month_str: str) -> str:
     """
     イベント一覧から月全体の案内文を生成する。
-    順序: 特別講義（あれば）→ 講師対談 → 生徒対談 → ジャンル特化グルコン（ジャンルごと・日付順）
+    順序: その他のジャンル（あれば）→ 特別講義（あれば）→ 講師対談 → 生徒対談
+          → ジャンル特化グルコン（ジャンルごと・日付順）
     """
     year = datetime.now().year
     # 内部用キーを除いたコピーで、1イベント1件（事前告知のみ）
@@ -123,6 +124,7 @@ def build_monthly_overview(events: List[Dict[str, Any]], month_str: str) -> str:
     instructor = []    # 講師対談
     student = []      # 生徒対談
     genre_events = []  # ジャンル特化グルコン
+    other = []         # 既知のテンプレートに当てはまらないイベント
 
     for ev in clean:
         et = ev.get("event_type", "")
@@ -134,6 +136,8 @@ def build_monthly_overview(events: List[Dict[str, Any]], month_str: str) -> str:
             student.append(ev)
         elif "ジャンル特化グルコン" in et:
             genre_events.append(ev)
+        else:
+            other.append(ev)
 
     def sort_by_date(lst):
         return sorted(lst, key=lambda e: _parse_date_for_sort(e.get("date", ""), e.get("time", ""), year))
@@ -141,8 +145,26 @@ def build_monthly_overview(events: List[Dict[str, Any]], month_str: str) -> str:
     instructor = sort_by_date(instructor)
     student = sort_by_date(student)
     genre_events = sort_by_date(genre_events)
+    other = sort_by_date(other)
 
     lines = [f"# {month_str}のイベント案内📢", ""]
+
+    # その他のジャンル（未分類イベントがある場合のみ、最上部に表示）
+    if other:
+        lines.append("## 【その他のジャンル】")
+        lines.append("")
+        for i, ev in enumerate(other, 1):
+            date_fmt = _format_date_long(ev.get("date", ""), ev.get("time", ""), year)
+            event_content = (
+                ev.get("event_name")
+                or ev.get("_raw_summary")
+                or ev.get("teacher_name")
+                or "内容未設定"
+            )
+            lines.append(f"{_num(i)}開催日：{date_fmt}")
+            lines.append(f"イベント内容：{event_content}")
+            lines.append("")
+        lines.append("")
 
     # 特別講義（あれば）
     if special:

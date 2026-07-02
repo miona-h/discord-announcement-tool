@@ -21,7 +21,10 @@ def parse_event_name(event_name: str) -> Dict[str, str]:
     elif "オン会" in event_name:
         result["event_type"] = "オン会（事前告知）"
     else:
-        result["event_type"] = "ジャンル特化グルコン（事前告知）"
+        # 既知のテンプレートに当てはまらない予定は、月全体案内の
+        # 「その他のジャンル」に表示する。誤ってグルコン扱いにしない。
+        result["event_type"] = "その他（事前告知）"
+        result["event_name"] = event_name.strip()
 
     # ジャンル: （〇〇）または (〇〇) から抽出（例: （スポット）/(スポット) → スポット）
     match_genre = re.search(r'（(.+?)）', event_name) or re.search(r'\((.+?)\)', event_name)

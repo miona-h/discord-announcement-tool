@@ -84,9 +84,16 @@ def _get_channel_name(event_type: str) -> str:
     return "交流会のお知らせ"
 
 
+def _get_channel_names(event_type: str) -> list[str]:
+    """イベント種別に応じた配信先一覧を返す"""
+    if "万垢生限定オン会" in str(event_type) or "万垢" in str(event_type):
+        return ["万垢お知らせチャンネル", "講師お知らせ", "専属講師チーム"]
+    return [_get_channel_name(event_type)]
+
+
 def _get_post_date_time(event_type: str, event_date: str, event_time: str):
     """
-    事前告知＝前日18:00固定、まもなく開始＝当日開始5分前 を返す。
+    事前告知＝前日18:00固定、まもなく開始＝当日開始15分前 を返す。
     戻り値: (日付文字列 "M/D", 時間文字列 "HH:MM")
     """
     from datetime import datetime, timedelta
@@ -110,7 +117,8 @@ def _get_post_date_time(event_type: str, event_date: str, event_time: str):
                 parts_t = t.split(":")
                 h = int(parts_t[0])
                 mi = int(parts_t[1]) if len(parts_t) > 1 else 0
-                t_dt = datetime(year, m, d, h, mi) - timedelta(minutes=5)
+                t_dt = datetime(year, m, d, h, mi) - timedelta(minutes=15)
+                post_date_str = f"{t_dt.month}/{t_dt.day}"
                 post_time_str = f"{t_dt.hour:02d}:{t_dt.minute:02d}"
             else:
                 post_time_str = t
@@ -387,18 +395,18 @@ if GOOGLE_API_AVAILABLE:
                             post_date, post_time = _get_post_date_time(
                                 row_type, ev_row.get("date", ""), ev_row.get("time", "")
                             )
-                            channel_name = _get_channel_name(row_type)
                             is_valid = generator.validate_event_data(ev_row)[0]
                             if not is_valid:
                                 continue
                             ann = generator.generate(ev_row) or ""
                             msg = (ann or "").replace("\r", "\n")
-                            rows.append({
-                                "メッセージ": msg,
-                                "日付": post_date,
-                                "時間": post_time,
-                                "チャンネル名": channel_name,
-                            })
+                            for channel_name in _get_channel_names(row_type):
+                                rows.append({
+                                    "メッセージ": msg,
+                                    "日付": post_date,
+                                    "時間": post_time,
+                                    "チャンネル名": channel_name,
+                                })
                     if rows:
                         import io
                         import csv as csv_module
@@ -417,7 +425,7 @@ if GOOGLE_API_AVAILABLE:
                             mime="text/csv; charset=utf-8",
                             key="dl_bulk_csv",
                         )
-                        st.caption("💡 事前告知＝前日18:00・まもなく開始＝開始5分前。A列=メッセージ, B列=日付(投稿日), C列=時間(投稿時間), D列=チャンネル名。")
+                        st.caption("💡 事前告知＝前日18:00・まもなく開始＝開始15分前。A列=メッセージ, B列=日付(投稿日), C列=時間(投稿時間), D列=チャンネル名。")
                     else:
                         st.warning("生成できる予定がありませんでした。")
 
@@ -443,7 +451,7 @@ if GOOGLE_API_AVAILABLE:
                             height=500,
                             key="monthly_overview_output",
                         )
-                        st.caption("💡 特別講義→講師対談→生徒対談→ジャンル特化グルコン（ジャンルごと・日付順）")
+                        st.caption("💡 その他のジャンル→特別講義→講師対談→生徒対談→ジャンル特化グルコン（ジャンルごと・日付順）")
                     except Exception as e:
                         st.error(f"エラー: {e}")
     tab_idx += 1
