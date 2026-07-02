@@ -27,15 +27,16 @@ event_type,template
 
 ### 【📢グルコンルール】
 ・1分以上、質問や添削依頼が届かない場合は終了とさせていただきます。
-・予定の1時間より早めに終了する場合がございますのでご了承ください。
 ・質問の回答があった場合はできるだけミュート解除をして、会話形式でご参加ください。
-・質問回答は先着順となり、時間の都合上全ての質問にお答えできない場合がございますのでお早めにお送りいただくことを推奨いたします✨
+・質問回答は先着順となり、時間の都合上全ての質問にお答えできない場合がございますのでお早めにお送りいただくことを推奨いたします。
+・講師ごとに経験や得意分野が異なるため、アドバイスの内容や視点に違いが生じる場合があります。どちらが正しい・間違っているということではなく、それぞれの考え方の違いとして参考にしていただけますと幸いです。
+・ご質問の際は担当講師や他の講師への批判・評価につながる表現はお控えください。
 
 ### 【Zoom参加の際のお願い】
 Zoomの表示名のご変更をお願いいたします！お名前＋現役生の方はクラス名、卒業生の方は卒業生と記載してください🙇🏻‍♀️
 
 ▼以下のリンクから出席フォームをご提出後、表示されるリンクよりご参加ください▼
-https://script.google.com/macros/s/AKfycbzSulrYxlbxfEA3TV6qxQnKdFovVec78Oby4uKNQkAepCDwkX0MHFkBjx6laCKKbDqXAQ/exec?p=4
+https://script.google.com/macros/s/AKfycbywYV7EiZSXqjhIsNh0F_49Jl6FKkY6hTXJ9ZyxXYvjT3J_YEEHhK2wxvda6Fo2HUuA/exec?p=4
 
 ⚠️講師のSNSに個別でDMで質問するのはご遠慮ください。"
 ジャンル特化グルコン（間もなく開始）,"@everyone
@@ -47,7 +48,7 @@ https://script.google.com/macros/s/AKfycbzSulrYxlbxfEA3TV6qxQnKdFovVec78Oby4uKNQ
 {{instagram_url}}
 
 ▼以下のリンクから出席フォームをご提出後、表示されるリンクよりご参加ください▼
-https://script.google.com/macros/s/AKfycbzSulrYxlbxfEA3TV6qxQnKdFovVec78Oby4uKNQkAepCDwkX0MHFkBjx6laCKKbDqXAQ/exec?p=4
+https://script.google.com/macros/s/AKfycbywYV7EiZSXqjhIsNh0F_49Jl6FKkY6hTXJ9ZyxXYvjT3J_YEEHhK2wxvda6Fo2HUuA/exec?p=4
 
 ### 【Zoom参加の際のお願い】
 Zoomの表示名のご変更をお願いいたします！
@@ -73,22 +74,22 @@ Zoomの表示名のご変更をお願いいたします！
 皆様、予定を空けてご参加ください🌈
 
 ▼以下のリンクから出席フォームをご提出後、表示されるリンクよりご参加ください▼
-https://script.google.com/macros/s/AKfycbzSulrYxlbxfEA3TV6qxQnKdFovVec78Oby4uKNQkAepCDwkX0MHFkBjx6laCKKbDqXAQ/exec?p=1
+https://script.google.com/macros/s/AKfycbywYV7EiZSXqjhIsNh0F_49Jl6FKkY6hTXJ9ZyxXYvjT3J_YEEHhK2wxvda6Fo2HUuA/exec?p=1
 "
 生徒対談（間もなく開始）,"@everyone
 
 # まもなく{{time}}より生徒対談が始まります🌈
 
 ▼以下のリンクから出席フォームをご提出後、表示されるリンクよりご参加ください▼
-https://script.google.com/macros/s/AKfycbzSulrYxlbxfEA3TV6qxQnKdFovVec78Oby4uKNQkAepCDwkX0MHFkBjx6laCKKbDqXAQ/exec?p=1
+https://script.google.com/macros/s/AKfycbywYV7EiZSXqjhIsNh0F_49Jl6FKkY6hTXJ9ZyxXYvjT3J_YEEHhK2wxvda6Fo2HUuA/exec?p=1
 "
 講師対談（事前告知）,"@everyone
 
 ## 明日{{date}}の{{time}}より講師対談が開催されます‼️
 
-講師対談では、マネタイズ講座の陸統括と講師による対談を行います✨️
+講師対談では、ファシリテーター講師とゲスト講師による対談を行います✨️
 
-今回のゲスト
+今回のゲスト講師
 ーーーーーーーーーーーーーーーーーー
 ## 講師：{{teacher_name}}
 {{instagram_url}}
@@ -101,14 +102,14 @@ https://script.google.com/macros/s/AKfycbzSulrYxlbxfEA3TV6qxQnKdFovVec78Oby4uKNQ
 皆様、予定を空けてご参加ください🌈
 
 ▼以下のリンクから出席フォームをご提出後、表示されるリンクよりご参加ください▼
-https://script.google.com/macros/s/AKfycbzSulrYxlbxfEA3TV6qxQnKdFovVec78Oby4uKNQkAepCDwkX0MHFkBjx6laCKKbDqXAQ/exec?p=1
+https://script.google.com/macros/s/AKfycbywYV7EiZSXqjhIsNh0F_49Jl6FKkY6hTXJ9ZyxXYvjT3J_YEEHhK2wxvda6Fo2HUuA/exec?p=1
 "
 講師対談（間もなく開始）,"@everyone
 
 # まもなく{{time}}より講師対談が始まります🌈
 
 ▼以下のリンクから出席フォームをご提出後、表示されるリンクよりご参加ください▼
-https://script.google.com/macros/s/AKfycbzSulrYxlbxfEA3TV6qxQnKdFovVec78Oby4uKNQkAepCDwkX0MHFkBjx6laCKKbDqXAQ/exec?p=1
+https://script.google.com/macros/s/AKfycbywYV7EiZSXqjhIsNh0F_49Jl6FKkY6hTXJ9ZyxXYvjT3J_YEEHhK2wxvda6Fo2HUuA/exec?p=1
 
 ### 【Zoom参加の際のお願い】
 Zoomの表示名のご変更をお願いいたします！
@@ -120,7 +121,7 @@ Zoomの表示名のご変更をお願いいたします！
 フォロワー数別やジャンル別に分かれて、仲間と情報交換や悩み相談をしていただくことが可能です✨
 
 ▼以下のリンクから出席フォームをご提出後、表示されるリンクよりご参加ください▼
-https://script.google.com/macros/s/AKfycbzSulrYxlbxfEA3TV6qxQnKdFovVec78Oby4uKNQkAepCDwkX0MHFkBjx6laCKKbDqXAQ/exec?p=2
+https://script.google.com/macros/s/AKfycbywYV7EiZSXqjhIsNh0F_49Jl6FKkY6hTXJ9ZyxXYvjT3J_YEEHhK2wxvda6Fo2HUuA/exec?p=2
 
 参加予定の方は👍を押していただけますと幸いです！"
 オン会（間もなく開始）,"@everyone
@@ -128,8 +129,7 @@ https://script.google.com/macros/s/AKfycbzSulrYxlbxfEA3TV6qxQnKdFovVec78Oby4uKNQ
 # 間もなく{{time}}よりオン会が始まります🌈
 
 ▼以下のリンクから出席フォームをご提出後、表示されるリンクよりご参加ください▼
-https://script.google.com/macros/s/AKfycbzSulrYxlbxfEA3TV6qxQnKdFovVec78Oby4uKNQkAepCDwkX0MHFkBjx6laCKKbDqXAQ/exec?p=2"
-,
+https://script.google.com/macros/s/AKfycbywYV7EiZSXqjhIsNh0F_49Jl6FKkY6hTXJ9ZyxXYvjT3J_YEEHhK2wxvda6Fo2HUuA/exec?p=2"
 万垢生限定オン会（事前告知）,"@everyone
 
 # 明日{{date}}の{{time}}から万垢生&講師限定オン会が開催されます🌈
@@ -141,9 +141,9 @@ https://script.google.com/macros/s/AKfycbzSulrYxlbxfEA3TV6qxQnKdFovVec78Oby4uKNQ
 参加予定の方は👍🏻ボタンを押してください✨
 
 ▼以下のリンクから出席フォームをご提出後、表示されるリンクよりご参加ください▼
-https://script.google.com/macros/s/AKfycbzSulrYxlbxfEA3TV6qxQnKdFovVec78Oby4uKNQkAepCDwkX0MHFkBjx6laCKKbDqXAQ/exec?p=3"
+https://script.google.com/macros/s/AKfycbywYV7EiZSXqjhIsNh0F_49Jl6FKkY6hTXJ9ZyxXYvjT3J_YEEHhK2wxvda6Fo2HUuA/exec?p=3"
 万垢生限定オン会（間もなく開始）,"@everyone
 
 # まもなく{{time}}より万垢生&講師限定オン会が始まります✨
 ▼以下のリンクから出席フォームをご提出後、表示されるリンクよりご参加ください▼
-https://script.google.com/macros/s/AKfycbzSulrYxlbxfEA3TV6qxQnKdFovVec78Oby4uKNQkAepCDwkX0MHFkBjx6laCKKbDqXAQ/exec?p=3"
+https://script.google.com/macros/s/AKfycbywYV7EiZSXqjhIsNh0F_49Jl6FKkY6hTXJ9ZyxXYvjT3J_YEEHhK2wxvda6Fo2HUuA/exec?p=3"
