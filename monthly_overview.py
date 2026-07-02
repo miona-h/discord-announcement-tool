@@ -107,7 +107,7 @@ def _num(i: int) -> str:
 def build_monthly_overview(events: List[Dict[str, Any]], month_str: str) -> str:
     """
     イベント一覧から月全体の案内文を生成する。
-    順序: その他のジャンル（あれば）→ 特別講義（あれば）→ 講師対談 → 生徒対談
+    順序: その他ジャンル（あれば）→ オン会（あれば）→ 特別講義（あれば）→ 講師対談 → 生徒対談
           → ジャンル特化グルコン（ジャンルごと・日付順）
     """
     year = datetime.now().year
@@ -124,6 +124,7 @@ def build_monthly_overview(events: List[Dict[str, Any]], month_str: str) -> str:
     instructor = []    # 講師対談
     student = []      # 生徒対談
     genre_events = []  # ジャンル特化グルコン
+    online_events = []  # SnsClubオン会・万垢生限定オン会
     other = []         # 既知のテンプレートに当てはまらないイベント
 
     for ev in clean:
@@ -136,6 +137,8 @@ def build_monthly_overview(events: List[Dict[str, Any]], month_str: str) -> str:
             student.append(ev)
         elif "ジャンル特化グルコン" in et:
             genre_events.append(ev)
+        elif "オン会" in et:
+            online_events.append(ev)
         else:
             other.append(ev)
 
@@ -145,6 +148,7 @@ def build_monthly_overview(events: List[Dict[str, Any]], month_str: str) -> str:
     instructor = sort_by_date(instructor)
     student = sort_by_date(student)
     genre_events = sort_by_date(genre_events)
+    online_events = sort_by_date(online_events)
     other = sort_by_date(other)
 
     lines = [f"# {month_str}のイベント案内📢", ""]
@@ -158,6 +162,19 @@ def build_monthly_overview(events: List[Dict[str, Any]], month_str: str) -> str:
             event_name = ev.get("event_name", "")
             lines.append(f"{_num(i)}開催日：{date_fmt}")
             lines.append(f"イベント名：{event_name}")
+            lines.append("")
+        lines.append("")
+
+    # 通常オン会・万垢生限定オン会（日付順で一つの項目にまとめる）
+    if online_events:
+        lines.append("## 【オン会】")
+        lines.append("")
+        for i, ev in enumerate(online_events, 1):
+            et = ev.get("event_type", "")
+            event_label = "万垢生限定オン会" if "万垢" in et else "SnsClubオン会"
+            date_fmt = _format_date_short(ev.get("date", ""), ev.get("time", ""), year)
+            lines.append(f"{_num(i)}{event_label}")
+            lines.append(f"開催日：{date_fmt}")
             lines.append("")
         lines.append("")
 

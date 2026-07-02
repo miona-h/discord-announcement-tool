@@ -451,7 +451,7 @@ if GOOGLE_API_AVAILABLE:
                             height=500,
                             key="monthly_overview_output",
                         )
-                        st.caption("💡 その他のジャンル→特別講義→講師対談→生徒対談→ジャンル特化グルコン（ジャンルごと・日付順）")
+                        st.caption("💡 その他ジャンル→オン会→特別講義→講師対談→生徒対談→ジャンル特化グルコン（ジャンルごと・日付順）")
                     except Exception as e:
                         st.error(f"エラー: {e}")
     tab_idx += 1
