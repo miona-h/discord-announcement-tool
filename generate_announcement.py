@@ -105,14 +105,19 @@ class AnnouncementGenerator:
         # Zoom情報はテンプレート側に直接記載できるため、抽出値は必須にしない
         basic_required = ['time', 'event_type']
         event_specific_required = {
-            'ジャンル特化グルコン（間もなく開始）': ['genre', 'teacher_name', 'instagram_url'],
-            '生徒対談（間もなく開始）': [], '講師対談（間もなく開始）': [],
-            'オン会（間もなく開始）': [], 'オン会（事前告知）': [],
-            '万垢生限定オン会（事前告知）': [], '万垢生限定オン会（間もなく開始）': [],
+            'ジャンル特化グルコン（当日告知）': ['genre', 'teacher_name', 'instagram_url'],
+            '生徒対談（当日告知）': ['teacher_name'],
+            '講師対談（当日告知）': ['teacher_name'],
+            'オン会（当日告知）': [],
+            '万垢生限定オン会（当日告知）': [],
         }
-        no_teacher_events = ['オン会（事前告知）', 'オン会（間もなく開始）', '万垢生限定オン会（事前告知）', '万垢生限定オン会（間もなく開始）']
-        if '（事前告知）' in event_type:
+        no_teacher_events = ['オン会（当日告知）', '万垢生限定オン会（当日告知）']
+        if '（当日告知）' in event_type:
             required_fields = basic_required + (['date'] if event_type in no_teacher_events else ['date', 'teacher_name'])
+            if event_type in event_specific_required:
+                for f in event_specific_required[event_type]:
+                    if f not in required_fields:
+                        required_fields.append(f)
         elif event_type in event_specific_required:
             required_fields = basic_required + event_specific_required[event_type]
         else:

@@ -9,22 +9,23 @@ from typing import Dict
 
 
 def parse_event_name(event_name: str) -> Dict[str, str]:
-    result = {}
+    # 月全体案内で「その他ジャンル」に分類された場合も空欄にならないよう、
+    # イベント種別にかかわらずカレンダーの予定名を保持する。
+    result = {"event_name": event_name.strip()}
     if "万垢生限定オン会" in event_name or ("万垢" in event_name and "限定オン会" in event_name):
-        result["event_type"] = "万垢生限定オン会（事前告知）"
+        result["event_type"] = "万垢生限定オン会（当日告知）"
     elif "ジャンル特化グルコン" in event_name:
-        result["event_type"] = "ジャンル特化グルコン（事前告知）"
+        result["event_type"] = "ジャンル特化グルコン（当日告知）"
     elif "生徒対談" in event_name:
-        result["event_type"] = "生徒対談（事前告知）"
+        result["event_type"] = "生徒対談（当日告知）"
     elif "講師対談" in event_name:
-        result["event_type"] = "講師対談（事前告知）"
+        result["event_type"] = "講師対談（当日告知）"
     elif "オン会" in event_name:
-        result["event_type"] = "オン会（事前告知）"
+        result["event_type"] = "オン会（当日告知）"
     else:
         # 既知のテンプレートに当てはまらない予定は、月全体案内の
         # 「その他のジャンル」に表示する。誤ってグルコン扱いにしない。
-        result["event_type"] = "その他（事前告知）"
-        result["event_name"] = event_name.strip()
+        result["event_type"] = "その他（当日告知）"
 
     # ジャンル: （〇〇）または (〇〇) から抽出（例: （スポット）/(スポット) → スポット）
     match_genre = re.search(r'（(.+?)）', event_name) or re.search(r'\((.+?)\)', event_name)
@@ -58,6 +59,12 @@ def parse_event_name(event_name: str) -> Dict[str, str]:
     elif "生徒対談" in event_name:
         # 【生徒対談】ぽぽ⌇看護師・発酵料理士アドバイザー
         m = re.search(r'【生徒対談】\s*(.+)', event_name)
+        if m:
+            result["teacher_name"] = m.group(1).strip()
+    elif result.get("event_type") == "その他（当日告知）":
+        # 【イベント名】講師名（ジャンル）の形式なら講師名を取り出す。
+        # タイトルだけの予定は、説明文のInstagram表示名による補完に任せる。
+        m = re.match(r'^【[^】]+】\s*(.+?)(?:（[^）]+）|\([^)]*\))?\s*$', event_name)
         if m:
             result["teacher_name"] = m.group(1).strip()
 

@@ -20,54 +20,29 @@ CALENDAR_EXCLUDE_TITLES = ["週報提出"]
 DATE_FORMAT = "%Y年%m月%d日"
 TIME_FORMAT = "%H:%M"
 
-# イベント種別ごとの固定Zoom情報
+# イベント種別ごとの固定Zoom情報（テンプレに直接記載する場合は未使用）
 FIXED_ZOOM_INFO = {
-    "ジャンル特化グルコン（事前告知）": {
+    "ジャンル特化グルコン（当日告知）": {
         "zoom_url": "https://us06web.zoom.us/j/86783391679?pwd=A7t1L99e5NHZBJOj5tMEPNHOUAyhh8.1",
         "meeting_id": "867 8339 1679",
         "passcode": "0000"
     },
-    "ジャンル特化グルコン（間もなく開始）": {
-        "zoom_url": "https://us06web.zoom.us/j/86783391679?pwd=A7t1L99e5NHZBJOj5tMEPNHOUAyhh8.1",
-        "meeting_id": "867 8339 1679",
-        "passcode": "0000"
-    },
-    "万垢生限定オン会（事前告知）": {
+    "万垢生限定オン会（当日告知）": {
         "zoom_url": "https://us06web.zoom.us/j/82465129951?pwd=hGUx2VD6SwjqgHZOsAjTW8UYjq9K7a.1",
         "meeting_id": "824 6512 9951",
         "passcode": "311619"
     },
-    "万垢生限定オン会（間もなく開始）": {
-        "zoom_url": "https://us06web.zoom.us/j/82465129951?pwd=hGUx2VD6SwjqgHZOsAjTW8UYjq9K7a.1",
-        "meeting_id": "824 6512 9951",
-        "passcode": "311619"
-    },
-    "生徒対談（事前告知）": {
+    "生徒対談（当日告知）": {
         "zoom_url": "https://us06web.zoom.us/j/84044741268?pwd=kkc7BHgUm82aaiNC3HxHGZVMSVF799.1",
         "meeting_id": "840 4474 1268",
         "passcode": "009706"
     },
-    "生徒対談（間もなく開始）": {
+    "講師対談（当日告知）": {
         "zoom_url": "https://us06web.zoom.us/j/84044741268?pwd=kkc7BHgUm82aaiNC3HxHGZVMSVF799.1",
         "meeting_id": "840 4474 1268",
         "passcode": "009706"
     },
-    "講師対談（事前告知）": {
-        "zoom_url": "https://us06web.zoom.us/j/84044741268?pwd=kkc7BHgUm82aaiNC3HxHGZVMSVF799.1",
-        "meeting_id": "840 4474 1268",
-        "passcode": "009706"
-    },
-    "講師対談（間もなく開始）": {
-        "zoom_url": "https://us06web.zoom.us/j/84044741268?pwd=kkc7BHgUm82aaiNC3HxHGZVMSVF799.1",
-        "meeting_id": "840 4474 1268",
-        "passcode": "009706"
-    },
-    "オン会（事前告知）": {
-        "zoom_url": "https://us06web.zoom.us/j/81644840347?pwd=NdMeW9PWVXz4Wp2QqscIHvjecEUV6L.1",
-        "meeting_id": "816 4484 0347",
-        "passcode": "121550"
-    },
-    "オン会（間もなく開始）": {
+    "オン会（当日告知）": {
         "zoom_url": "https://us06web.zoom.us/j/81644840347?pwd=NdMeW9PWVXz4Wp2QqscIHvjecEUV6L.1",
         "meeting_id": "816 4484 0347",
         "passcode": "121550"

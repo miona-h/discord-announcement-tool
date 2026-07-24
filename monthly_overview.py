@@ -111,12 +111,12 @@ def build_monthly_overview(events: List[Dict[str, Any]], month_str: str) -> str:
           → ジャンル特化グルコン（ジャンルごと・日付順）
     """
     year = datetime.now().year
-    # 内部用キーを除いたコピーで、1イベント1件（事前告知のみ）
+    # 内部用キーを除いたコピーで、1イベント1件（当日告知のみ）
     clean = []
     for ed in events:
         ev = {k: v for k, v in ed.items() if not k.startswith("_")}
         et = ev.get("event_type", "")
-        if "（事前告知）" not in et:
+        if "（当日告知）" not in et and "（事前告知）" not in et:
             continue
         clean.append(ev)
 

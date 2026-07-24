@@ -93,42 +93,19 @@ def _get_channel_names(event_type: str) -> list[str]:
 
 def _get_post_date_time(event_type: str, event_date: str, event_time: str):
     """
-    事前告知＝前日18:00固定、まもなく開始＝当日開始15分前 を返す。
+    当日告知＝開催当日 08:00 固定を返す。
     戻り値: (日付文字列 "M/D", 時間文字列 "HH:MM")
     """
-    from datetime import datetime, timedelta
+    from datetime import datetime
     year = datetime.now().year
-    post_date_str, post_time_str = str(event_date), str(event_time)
     try:
         parts = str(event_date).strip().split("/")
         if len(parts) >= 2:
             m, d = int(parts[0]), int(parts[1])
-        else:
-            return (event_date, "18:00" if "事前告知" in str(event_type) else event_time)
-        if "事前告知" in str(event_type):
-            event_dt = datetime(year, m, d)
-            prev = event_dt - timedelta(days=1)
-            post_date_str = f"{prev.month}/{prev.day}"
-            post_time_str = "18:00"
-        elif "間もなく開始" in str(event_type) or "まもなく" in str(event_type):
-            post_date_str = f"{m}/{d}"
-            t = str(event_time).strip()
-            if ":" in t:
-                parts_t = t.split(":")
-                h = int(parts_t[0])
-                mi = int(parts_t[1]) if len(parts_t) > 1 else 0
-                t_dt = datetime(year, m, d, h, mi) - timedelta(minutes=15)
-                post_date_str = f"{t_dt.month}/{t_dt.day}"
-                post_time_str = f"{t_dt.hour:02d}:{t_dt.minute:02d}"
-            else:
-                post_time_str = t
-        else:
-            post_date_str = f"{m}/{d}"
-            post_time_str = "18:00" if "事前告知" in str(event_type) else str(event_time)
+            return (f"{m}/{d}", "08:00")
+        return (event_date, "08:00")
     except Exception:
-        post_date_str = event_date
-        post_time_str = "18:00" if "事前告知" in str(event_type) else event_time
-    return (post_date_str, post_time_str)
+        return (event_date, "08:00")
 
 
 def _handle_oauth_callback():
@@ -380,33 +357,27 @@ if GOOGLE_API_AVAILABLE:
                         ev_copy = ed.copy()
                         for k in ("_id", "_raw_summary", "_raw_description"):
                             ev_copy.pop(k, None)
-                        event_type = ev_copy.get("event_type", "")
-                        # 1件の予定につき「事前告知」と「まもなく開始」の2行を出力（全日程に適用）
-                        for is_soon in (False, True):
-                            if is_soon:
-                                if "（事前告知）" not in event_type:
-                                    continue
-                                ev_row = ev_copy.copy()
-                                # 全角括弧で統一（事前告知→間もなく開始）
-                                ev_row["event_type"] = event_type.replace("（事前告知）", "（間もなく開始）")
-                            else:
-                                ev_row = ev_copy
-                            row_type = ev_row.get("event_type", "")
-                            post_date, post_time = _get_post_date_time(
-                                row_type, ev_row.get("date", ""), ev_row.get("time", "")
-                            )
-                            is_valid = generator.validate_event_data(ev_row)[0]
-                            if not is_valid:
-                                continue
-                            ann = generator.generate(ev_row) or ""
-                            msg = (ann or "").replace("\r", "\n")
-                            for channel_name in _get_channel_names(row_type):
-                                rows.append({
-                                    "メッセージ": msg,
-                                    "日付": post_date,
-                                    "時間": post_time,
-                                    "チャンネル名": channel_name,
-                                })
+                        # 1件の予定につき「当日告知」1行を出力（開催当日 08:00）
+                        if "（事前告知）" in (ev_copy.get("event_type") or ""):
+                            ev_copy["event_type"] = ev_copy["event_type"].replace("（事前告知）", "（当日告知）")
+                        if "（間もなく開始）" in (ev_copy.get("event_type") or ""):
+                            ev_copy["event_type"] = ev_copy["event_type"].replace("（間もなく開始）", "（当日告知）")
+                        row_type = ev_copy.get("event_type", "")
+                        post_date, post_time = _get_post_date_time(
+                            row_type, ev_copy.get("date", ""), ev_copy.get("time", "")
+                        )
+                        is_valid = generator.validate_event_data(ev_copy)[0]
+                        if not is_valid:
+                            continue
+                        ann = generator.generate(ev_copy) or ""
+                        msg = (ann or "").replace("\r", "\n")
+                        for channel_name in _get_channel_names(row_type):
+                            rows.append({
+                                "メッセージ": msg,
+                                "日付": post_date,
+                                "時間": post_time,
+                                "チャンネル名": channel_name,
+                            })
                     if rows:
                         import io
                         import csv as csv_module
@@ -425,7 +396,7 @@ if GOOGLE_API_AVAILABLE:
                             mime="text/csv; charset=utf-8",
                             key="dl_bulk_csv",
                         )
-                        st.caption("💡 事前告知＝前日18:00・まもなく開始＝開始15分前。A列=メッセージ, B列=日付(投稿日), C列=時間(投稿時間), D列=チャンネル名。")
+                        st.caption("💡 当日告知＝開催当日08:00。A列=メッセージ, B列=日付(投稿日), C列=時間(投稿時間), D列=チャンネル名。")
                     else:
                         st.warning("生成できる予定がありませんでした。")
 
@@ -460,11 +431,11 @@ with tabs[tab_idx]:
     st.markdown("**イベント情報を手動で入力**")
     _gen = AnnouncementGenerator(templates_override=st.session_state.get("custom_templates", {}))
     _event_type_options = sorted(_gen.templates.keys()) or [
-                "ジャンル特化グルコン（事前告知）", "ジャンル特化グルコン（間もなく開始）",
-                "万垢生限定オン会（事前告知）", "万垢生限定オン会（間もなく開始）",
-                "生徒対談（事前告知）", "生徒対談（間もなく開始）",
-                "講師対談（事前告知）", "講師対談（間もなく開始）",
-                "オン会（事前告知）", "オン会（間もなく開始）",
+                "ジャンル特化グルコン（当日告知）",
+                "万垢生限定オン会（当日告知）",
+                "生徒対談（当日告知）",
+                "講師対談（当日告知）",
+                "オン会（当日告知）",
             ]
     col1, col2 = st.columns(2)
     with col1:
@@ -531,7 +502,7 @@ with tabs[tab_idx]:
 
     st.subheader("テンプレートを追加")
     with st.form("add_template_form", clear_on_submit=True):
-        new_event_type = st.text_input("イベント種別名", placeholder="例: 特別講義（事前告知）")
+        new_event_type = st.text_input("イベント種別名", placeholder="例: 特別講義（当日告知）")
         new_template = st.text_area("テンプレート本文", placeholder="@everyone\n\n## 明日{{date}}の{{time}}より特別講義が開催されます...\n\n利用可能な変数: {{date}}, {{time}}, {{teacher_name}}, {{instagram_url}}, {{zoom_url}}, {{genre}} など", height=200)
         if st.form_submit_button("追加"):
             if new_event_type and new_template:
@@ -600,11 +571,11 @@ if st.button("📝 告知文を生成", type="primary", key="btn_generate"):
 st.divider()
 st.markdown("""
 **利用可能なテンプレート**
-- ジャンル特化グルコン（事前告知 / 間もなく開始）
-- 万垢生限定オン会（事前告知 / 間もなく開始）
-- 生徒対談（事前告知 / 間もなく開始）
-- 講師対談（事前告知 / 間もなく開始）
-- オン会（事前告知 / 間もなく開始）
+- ジャンル特化グルコン（当日告知）
+- 万垢生限定オン会（当日告知）
+- 生徒対談（当日告知）
+- 講師対談（当日告知）
+- オン会（当日告知）
 - 月全体の案内文（Googleカレンダー連携タブで「月全体の案内文を生成」）
 - **テンプレート管理**タブで特別講義など新しい種別を追加できます
 """)
