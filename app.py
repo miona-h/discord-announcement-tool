@@ -621,7 +621,20 @@ if GOOGLE_API_AVAILABLE:
                 if st.button("📋 1ヶ月分の告知文を一括生成", type="primary", key="btn_bulk"):
                     generator = AnnouncementGenerator()
                     rows = []
+                    unmatched_events = []
                     for ed in events_list:
+                        event_type_original = str(ed.get("event_type", "") or "").strip()
+                        if event_type_original not in generator.templates:
+                            event_name = (
+                                str(ed.get("_raw_summary", "") or "").strip()
+                                or str(ed.get("event_name", "") or "").strip()
+                                or "イベント名未設定"
+                            )
+                            unmatched_events.append({
+                                "開催日": ed.get("date", ""),
+                                "開始時間": ed.get("time", ""),
+                                "イベント名": event_name,
+                            })
                         ev_copy = ed.copy()
                         for k in ("_id", "_raw_summary", "_raw_description"):
                             ev_copy.pop(k, None)
@@ -650,6 +663,27 @@ if GOOGLE_API_AVAILABLE:
                                     "時間": post_time,
                                     "チャンネル名": item["channel"],
                                 })
+                    if unmatched_events:
+                        st.warning(
+                            f"⚠️ テンプレート未登録のイベントが{len(unmatched_events)}件あります。"
+                            "新しいイベントの可能性があるため、内容を確認してください。"
+                        )
+                        st.dataframe(
+                            unmatched_events,
+                            use_container_width=True,
+                            hide_index=True,
+                            column_config={
+                                "開催日": st.column_config.TextColumn("開催日", width="small"),
+                                "開始時間": st.column_config.TextColumn("開始時間", width="small"),
+                                "イベント名": st.column_config.TextColumn("イベント名", width="large"),
+                            },
+                        )
+                        st.caption(
+                            "💡 告知が必要なイベントは、Googleスプレッドシートの「テンプレート」タブへ追加し、"
+                            "「スプレッドシートの変更をツールへ反映」を押してください。"
+                        )
+                    else:
+                        st.success("✅ 取得したイベントはすべてテンプレートに登録されています。")
                     if rows:
                         import io
                         import csv as csv_module
