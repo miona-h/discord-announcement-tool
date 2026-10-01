@@ -1,4 +1,4 @@
-﻿event_type,template,channels
+﻿event_type,template,channels,match_keywords
 ジャンル特化グルコン（当日告知）,"@everyone
 
 ## 本日{{date}}の{{time}}よりジャンル特化グルコンが開催されます📢
@@ -40,7 +40,7 @@ Zoomの表示名のご変更をお願いいたします！お名前＋現役生�
 ▼以下のリンクから出席フォームをご提出後、表示されるリンクよりご参加ください▼
 https://script.google.com/macros/s/AKfycbywYV7EiZSXqjhIsNh0F_49Jl6FKkY6hTXJ9ZyxXYvjT3J_YEEHhK2wxvda6Fo2HUuA/exec?p=4
 
-⚠️講師のSNSに個別でDMで質問するのはご遠慮ください。",ジャンル特化グルコンのお知らせ
+⚠️講師のSNSに個別でDMで質問するのはご遠慮ください。",ジャンル特化グルコンのお知らせ,グルコン
 生徒対談（当日告知）,"@everyone
 
 ## 本日{{date}}の{{time}}より生徒対談が開催されます‼️
@@ -60,7 +60,7 @@ https://script.google.com/macros/s/AKfycbywYV7EiZSXqjhIsNh0F_49Jl6FKkY6hTXJ9ZyxX
 皆様、予定を空けてご参加ください🌈
 
 ▼以下のリンクから出席フォームをご提出後、表示されるリンクよりご参加ください▼
-https://script.google.com/macros/s/AKfycbywYV7EiZSXqjhIsNh0F_49Jl6FKkY6hTXJ9ZyxXYvjT3J_YEEHhK2wxvda6Fo2HUuA/exec?p=1",交流会のお知らせ
+https://script.google.com/macros/s/AKfycbywYV7EiZSXqjhIsNh0F_49Jl6FKkY6hTXJ9ZyxXYvjT3J_YEEHhK2wxvda6Fo2HUuA/exec?p=1",交流会のお知らせ,生徒対談
 講師対談（当日告知）,"@everyone
 
 ## 本日{{date}}の{{time}}より講師対談が開催されます‼️
@@ -80,7 +80,7 @@ https://script.google.com/macros/s/AKfycbywYV7EiZSXqjhIsNh0F_49Jl6FKkY6hTXJ9ZyxX
 皆様、予定を空けてご参加ください🌈
 
 ▼以下のリンクから出席フォームをご提出後、表示されるリンクよりご参加ください▼
-https://script.google.com/macros/s/AKfycbywYV7EiZSXqjhIsNh0F_49Jl6FKkY6hTXJ9ZyxXYvjT3J_YEEHhK2wxvda6Fo2HUuA/exec?p=1",交流会のお知らせ
+https://script.google.com/macros/s/AKfycbywYV7EiZSXqjhIsNh0F_49Jl6FKkY6hTXJ9ZyxXYvjT3J_YEEHhK2wxvda6Fo2HUuA/exec?p=1",交流会のお知らせ,講師対談
 オン会（当日告知）,"@everyone
 
 # 本日{{date}}の{{time}}よりオン会が開催されます🌈
@@ -90,7 +90,7 @@ https://script.google.com/macros/s/AKfycbywYV7EiZSXqjhIsNh0F_49Jl6FKkY6hTXJ9ZyxX
 ▼以下のリンクから出席フォームをご提出後、表示されるリンクよりご参加ください▼
 https://script.google.com/macros/s/AKfycbywYV7EiZSXqjhIsNh0F_49Jl6FKkY6hTXJ9ZyxXYvjT3J_YEEHhK2wxvda6Fo2HUuA/exec?p=2
 
-参加予定の方は👍を押していただけますと幸いです！",交流会のお知らせ
+参加予定の方は👍を押していただけますと幸いです！",交流会のお知らせ,オン会
 万垢生限定オン会（当日告知）,"@everyone
 
 # 本日{{date}}の{{time}}から万垢生限定オン会が開催されます🌈
@@ -102,4 +102,4 @@ https://script.google.com/macros/s/AKfycbywYV7EiZSXqjhIsNh0F_49Jl6FKkY6hTXJ9ZyxX
 参加予定の方は👍🏻ボタンを押してください✨
 
 ▼以下のリンクから出席フォームをご提出後、表示されるリンクよりご参加ください▼
-https://script.google.com/macros/s/AKfycbywYV7EiZSXqjhIsNh0F_49Jl6FKkY6hTXJ9ZyxXYvjT3J_YEEHhK2wxvda6Fo2HUuA/exec?p=3","万垢お知らせチャンネル, 講師お知らせ, 専属講師チーム"
+https://script.google.com/macros/s/AKfycbywYV7EiZSXqjhIsNh0F_49Jl6FKkY6hTXJ9ZyxXYvjT3J_YEEHhK2wxvda6Fo2HUuA/exec?p=3","万垢お知らせチャンネル, 講師お知らせ, 専属講師チーム",万垢生限定オン会

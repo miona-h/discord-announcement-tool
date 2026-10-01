@@ -11,6 +11,7 @@ import sys
 import os
 import csv
 import io
+import re
 import urllib.request
 import urllib.parse
 from datetime import date, datetime
@@ -26,14 +27,11 @@ from google.oauth2.credentials import Credentials
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATE_CSV_PATH = os.path.join(APP_DIR, "templates", "templates.csv")
-CHANNEL_CSV_PATH = os.path.join(APP_DIR, "templates", "channels.csv")
-TEMPLATE_CSV_FIELDS = ["event_type", "template", "channels"]
-CHANNEL_CSV_FIELDS = ["channel_name", "webhook_url", "enabled", "memo"]
+TEMPLATE_CSV_FIELDS = ["event_type", "template", "channels", "match_keywords"]
 TEMPLATE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1d2BkB9xIQZnFVdiV7Bk-x3S2yA7XAmAgUPa79iLJrTo/edit?usp=sharing"
 TEMPLATE_SHEET_ID = "1d2BkB9xIQZnFVdiV7Bk-x3S2yA7XAmAgUPa79iLJrTo"
 TEMPLATE_SHEET_GID = "0"
-TEMPLATE_SHEET_RANGE = "テンプレート!A:C"
-CHANNEL_SHEET_RANGE = "配信先管理!A:D"
+TEMPLATE_SHEET_RANGE = "テンプレート!A:D"
 
 try:
     from streamlit_oauth import OAuth2Component
@@ -122,7 +120,7 @@ def _get_default_channel_names(event_type: str) -> list[str]:
 
 
 def _load_template_records() -> list[dict]:
-    """テンプレートCSVから event_type/template/channels を読み込む"""
+    """テンプレートCSVから event_type/template/channels/match_keywords を読み込む"""
     records = []
     if not os.path.exists(TEMPLATE_CSV_PATH):
         return records
@@ -141,6 +139,7 @@ def _load_template_records() -> list[dict]:
                     "event_type": event_type,
                     "template": template,
                     "channels": channels,
+                    "match_keywords": (row.get("match_keywords") or "").strip(),
                 })
     except Exception as e:
         st.error(f"テンプレートCSVの読み込みに失敗しました: {e}")
@@ -151,11 +150,11 @@ def _parse_template_csv(text: str) -> list[dict]:
     """Googleスプレッドシートから取得したCSVを検証する"""
     reader = csv.DictReader(io.StringIO(text.lstrip("\ufeff")))
     fieldnames = [str(name or "").strip() for name in (reader.fieldnames or [])]
-    required = {"event_type", "template", "channels"}
+    required = {"event_type", "template", "channels", "match_keywords"}
     missing = required - set(fieldnames)
     if missing:
         raise ValueError(
-            "1行目に event_type, template, channels の3列が必要です。"
+            "1行目に event_type, template, channels, match_keywords の4列が必要です。"
             f" 不足: {', '.join(sorted(missing))}"
         )
 
@@ -164,7 +163,8 @@ def _parse_template_csv(text: str) -> list[dict]:
         event_type = (row.get("event_type") or "").strip()
         template = (row.get("template") or "").strip()
         channels = (row.get("channels") or "").strip()
-        if not event_type and not template and not channels:
+        match_keywords = (row.get("match_keywords") or "").strip()
+        if not event_type and not template and not channels and not match_keywords:
             continue
         if not event_type or not template:
             raise ValueError(f"{row_number}行目: event_type と template は必須です。")
@@ -172,6 +172,7 @@ def _parse_template_csv(text: str) -> list[dict]:
             "event_type": event_type,
             "template": template,
             "channels": channels or _join_channels(_get_default_channel_names(event_type)),
+            "match_keywords": match_keywords,
         })
     if not records:
         raise ValueError("有効なテンプレートが1件もありません。")
@@ -208,27 +209,10 @@ def _parse_template_sheet_values(values: list[list]) -> list[dict]:
             "event_type": event_type,
             "template": template,
             "channels": channels or _join_channels(_get_default_channel_names(event_type)),
+            "match_keywords": rec.get("match_keywords", "").strip(),
         })
     if not normalized:
         raise ValueError("有効なテンプレートが1件もありません。")
-    return normalized
-
-
-def _parse_channel_sheet_values(values: list[list]) -> list[dict]:
-    records = _sheet_values_to_records(values, CHANNEL_CSV_FIELDS)
-    normalized = []
-    for rec in records:
-        channel_name = rec.get("channel_name", "").strip()
-        if not channel_name:
-            continue
-        normalized.append({
-            "channel_name": channel_name,
-            "webhook_url": rec.get("webhook_url", "").strip(),
-            "enabled": rec.get("enabled", "TRUE").strip() or "TRUE",
-            "memo": rec.get("memo", "").strip(),
-        })
-    if not normalized:
-        raise ValueError("有効な配信先が1件もありません。")
     return normalized
 
 
@@ -263,6 +247,7 @@ def _save_template_records(records: list[dict]) -> tuple[bool, str]:
                         "event_type": event_type,
                         "template": template,
                         "channels": channels or _join_channels(_get_default_channel_names(event_type)),
+                        "match_keywords": (rec.get("match_keywords") or "").strip(),
                     })
         os.replace(tmp_path, TEMPLATE_CSV_PATH)
         return True, "保存しました"
@@ -270,31 +255,37 @@ def _save_template_records(records: list[dict]) -> tuple[bool, str]:
         return False, str(e)
 
 
-def _save_channel_records(records: list[dict]) -> tuple[bool, str]:
-    """配信先マスタをローカルキャッシュへ保存する"""
-    try:
-        os.makedirs(os.path.dirname(CHANNEL_CSV_PATH), exist_ok=True)
-        tmp_path = CHANNEL_CSV_PATH + ".tmp"
-        with open(tmp_path, "w", encoding="utf-8-sig", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=CHANNEL_CSV_FIELDS)
-            writer.writeheader()
-            for rec in records:
-                writer.writerow({field: rec.get(field, "") for field in CHANNEL_CSV_FIELDS})
-        os.replace(tmp_path, CHANNEL_CSV_PATH)
-        return True, "保存しました"
-    except Exception as e:
-        return False, str(e)
+def _keyword_groups(text: str) -> list[list[str]]:
+    """判定キーワードを解析する。カンマ区切りはAND、|区切りはOR。"""
+    groups = []
+    for raw_group in str(text or "").split("|"):
+        keywords = [k.strip() for k in re.split(r"[,、+\n]+", raw_group) if k.strip()]
+        if keywords:
+            groups.append(keywords)
+    return groups
 
 
-def _load_channel_records() -> list[dict]:
-    if not os.path.exists(CHANNEL_CSV_PATH):
-        return []
-    try:
-        with open(CHANNEL_CSV_PATH, "r", encoding="utf-8-sig", newline="") as f:
-            return [dict(row) for row in csv.DictReader(f) if (row.get("channel_name") or "").strip()]
-    except Exception as e:
-        st.error(f"配信先マスタの読み込みに失敗しました: {e}")
-        return []
+def _apply_template_keyword_match(event_data: dict) -> dict:
+    """イベント名と判定キーワードを照合し、最も具体的なテンプレート種別を適用する。"""
+    result = event_data.copy()
+    event_name = (
+        str(result.get("_raw_summary", "") or "").strip()
+        or str(result.get("event_name", "") or "").strip()
+    )
+    if not event_name:
+        return result
+
+    best = None
+    for row_index, rec in enumerate(_load_template_records()):
+        for keywords in _keyword_groups(rec.get("match_keywords", "")):
+            if all(keyword in event_name for keyword in keywords):
+                # キーワード数が多く、文字数が長い（より具体的な）ルールを優先する。
+                score = (len(keywords), sum(len(keyword) for keyword in keywords), -row_index)
+                if best is None or score > best[0]:
+                    best = (score, rec.get("event_type", ""))
+    if best and best[1]:
+        result["event_type"] = best[1]
+    return result
 
 
 def _find_template_records(event_type: str) -> list[dict]:
@@ -576,6 +567,7 @@ if GOOGLE_API_AVAILABLE:
                                 continue
                             ed = api_event_to_event_data(ev, parse_event_name)
                             ed["_id"] = ev.get("id", "")
+                            ed = _apply_template_keyword_match(ed)
                             event_data_list.append(ed)
                         st.session_state["calendar_events"] = event_data_list
                     except Exception as e:
@@ -589,7 +581,7 @@ if GOOGLE_API_AVAILABLE:
                 ]
                 selected = st.selectbox("告知文を生成する予定を選んでください", range(len(options)), format_func=lambda i: options[i])
                 if st.button("📝 この予定で告知文を生成", type="primary"):
-                    ed = events_list[selected].copy()
+                    ed = _apply_template_keyword_match(events_list[selected])
                     for k in ("_id", "_raw_summary", "_raw_description"):
                         ed.pop(k, None)
                     try:
@@ -622,7 +614,8 @@ if GOOGLE_API_AVAILABLE:
                     generator = AnnouncementGenerator()
                     rows = []
                     unmatched_events = []
-                    for ed in events_list:
+                    for original_ed in events_list:
+                        ed = _apply_template_keyword_match(original_ed)
                         event_type_original = str(ed.get("event_type", "") or "").strip()
                         if event_type_original not in generator.templates:
                             event_name = (
@@ -709,7 +702,7 @@ if GOOGLE_API_AVAILABLE:
                 st.divider()
                 st.markdown("**月全体の案内文を生成**")
                 if st.button("📅 月全体の案内文を生成", type="primary", key="btn_monthly"):
-                    ev_clean = [ed.copy() for ed in events_list]
+                    ev_clean = [_apply_template_keyword_match(ed) for ed in events_list]
                     for ed in ev_clean:
                         for k in ("_id", "_raw_summary", "_raw_description"):
                             ed.pop(k, None)
@@ -775,19 +768,14 @@ with tabs[tab_idx]:
                 if updated:
                     st.session_state["google_credentials"] = updated
                 template_values = fetch_spreadsheet_values(creds, TEMPLATE_SHEET_ID, TEMPLATE_SHEET_RANGE)
-                channel_values = fetch_spreadsheet_values(creds, TEMPLATE_SHEET_ID, CHANNEL_SHEET_RANGE)
                 sheet_records = _parse_template_sheet_values(template_values)
-                channel_records = _parse_channel_sheet_values(channel_values)
                 ok, msg = _save_template_records(sheet_records)
-                if not ok:
-                    raise RuntimeError(msg)
-                ok, msg = _save_channel_records(channel_records)
                 if not ok:
                     raise RuntimeError(msg)
                 updated_at = datetime.now(ZoneInfo("Asia/Tokyo")).strftime("%Y/%m/%d %H:%M:%S")
                 st.session_state["template_sheet_synced_at"] = updated_at
                 st.session_state["template_sheet_sync_message"] = (
-                    f"テンプレート{len(sheet_records)}件、配信先{len(channel_records)}件を反映しました。"
+                    f"テンプレートと判定ルールを{len(sheet_records)}件反映しました。"
                 )
                 st.rerun()
             except Exception as e:
@@ -801,20 +789,14 @@ with tabs[tab_idx]:
         "**スプレッドシートの列**  \n"
         "A列 `event_type`：イベント種別名　/　"
         "B列 `template`：メッセージ本文　/　"
-        "C列 `channels`：配信先（複数はカンマ区切り）"
+        "C列 `channels`：配信先（複数はカンマ区切り）　/　"
+        "D列 `match_keywords`：判定キーワード（カンマ区切りはAND、`|`区切りはOR）"
     )
 
-    channel_records = _load_channel_records()
-    st.subheader("配信先マスタ")
-    st.caption("追加・修正はスプレッドシートの「配信先管理」で行います。Webhook URLはこの画面に表示しません。")
-    if channel_records:
-        for rec in channel_records:
-            enabled = str(rec.get("enabled", "")).upper() not in {"FALSE", "0", "OFF", "NO"}
-            webhook_status = "設定済み" if rec.get("webhook_url") else "未設定"
-            icon = "✅" if enabled else "⏸️"
-            st.write(f"{icon} {rec['channel_name']} ｜ Webhook: {webhook_status}")
-    else:
-        st.info("配信先マスタはまだツールに反映されていません。")
+    st.caption(
+        "例：フォロワー別グルコンは `フォロワー別,グルコン`、通常のグルコンは `グルコン`。"
+        "複数キーワードのルールが自動的に優先されます。"
+    )
 
     template_records = _load_template_records()
     st.subheader("現在ツールに反映中のテンプレート")
@@ -823,7 +805,9 @@ with tabs[tab_idx]:
             event_type = rec["event_type"]
             body = rec["template"]
             channels = rec.get("channels", "")
+            match_keywords = rec.get("match_keywords", "") or "（設定なし）"
             with st.expander(f"**{event_type}**｜配信先：{channels}"):
+                st.caption(f"判定キーワード：{match_keywords}")
                 st.text_area("本文プレビュー", body, height=240, key=f"preview_{i}", disabled=True)
     else:
         st.warning("反映中のテンプレートがありません。")

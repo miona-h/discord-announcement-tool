@@ -14,7 +14,11 @@ def parse_event_name(event_name: str) -> Dict[str, str]:
     result = {"event_name": event_name.strip()}
     if "万垢生限定オン会" in event_name or ("万垢" in event_name and "限定オン会" in event_name):
         result["event_type"] = "万垢生限定オン会（当日告知）"
-    elif "ジャンル特化グルコン" in event_name:
+    # 「フォロワー別」を含むグルコンは、通常のジャンル特化グルコンより優先する。
+    elif "グルコン" in event_name and "フォロワー別" in event_name:
+        result["event_type"] = "フォロワー別グルコン（当日告知）"
+    # 「ストーリー特化グルコン」など、名称に「グルコン」があれば共通テンプレートを使う。
+    elif "グルコン" in event_name:
         result["event_type"] = "ジャンル特化グルコン（当日告知）"
     elif "生徒対談" in event_name:
         result["event_type"] = "生徒対談（当日告知）"
@@ -39,16 +43,16 @@ def parse_event_name(event_name: str) -> Dict[str, str]:
     else:
         result["genre"] = ""
 
-    # 講師名・ゲスト名: 予定名（タイトル）から抽出。ジャンル特化は「名前（ジャンル）」形式
-    if "ジャンル特化グルコン" in event_name:
-        # 【ジャンル特化グルコン】 カナノ⌇埼玉グルメ＆カフェ（スポット）または (スポット)
-        m = re.search(r'【ジャンル特化グルコン】\s*(.+?)（.+?）', event_name)
+    # 講師名・ゲスト名: 予定名（タイトル）から抽出。グルコンは「名前（ジャンル）」形式
+    if "グルコン" in event_name:
+        # 【ストーリー特化グルコン】あみり| ...（ストーリー特化）のような名称にも対応する。
+        m = re.search(r'】\s*(.+?)（.+?）', event_name)
         if not m:
-            m = re.search(r'【ジャンル特化グルコン】\s*(.+?)\(.+?\)', event_name)
+            m = re.search(r'】\s*(.+?)\(.+?\)', event_name)
         if m:
             result["teacher_name"] = m.group(1).strip()
         else:
-            m = re.search(r'【ジャンル特化グルコン】\s*(.+)', event_name)
+            m = re.search(r'】\s*(.+)', event_name)
             if m:
                 result["teacher_name"] = m.group(1).strip()
     elif "講師対談" in event_name:
