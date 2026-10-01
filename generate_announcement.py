@@ -98,6 +98,12 @@ class AnnouncementGenerator:
         if not event_type or event_type not in self.templates:
             return None
         return self._replace_variables(self.templates[event_type], event_data)
+
+    def generate_from_template(self, template: str, event_data: Dict) -> Optional[str]:
+        """指定されたテンプレート本文から告知文を生成する"""
+        if not template:
+            return None
+        return self._replace_variables(template, event_data.copy())
     
     def validate_event_data(self, event_data: Dict) -> tuple[bool, list[str]]:
         errors = []
@@ -110,9 +116,23 @@ class AnnouncementGenerator:
             '講師対談（当日告知）': ['teacher_name'],
             'オン会（当日告知）': [],
             '万垢生限定オン会（当日告知）': [],
+            'ジャンル特化グルコン（間もなく開始）': ['genre', 'teacher_name', 'instagram_url'],
+            '生徒対談（間もなく開始）': [],
+            '講師対談（間もなく開始）': [],
+            'オン会（間もなく開始）': [],
+            'オン会（事前告知）': [],
+            '万垢生限定オン会（事前告知）': [],
+            '万垢生限定オン会（間もなく開始）': [],
         }
-        no_teacher_events = ['オン会（当日告知）', '万垢生限定オン会（当日告知）']
-        if '（当日告知）' in event_type:
+        no_teacher_events = [
+            'オン会（当日告知）',
+            '万垢生限定オン会（当日告知）',
+            'オン会（事前告知）',
+            'オン会（間もなく開始）',
+            '万垢生限定オン会（事前告知）',
+            '万垢生限定オン会（間もなく開始）',
+        ]
+        if '（当日告知）' in event_type or '（事前告知）' in event_type:
             required_fields = basic_required + (['date'] if event_type in no_teacher_events else ['date', 'teacher_name'])
             if event_type in event_specific_required:
                 for f in event_specific_required[event_type]:

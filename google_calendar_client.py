@@ -23,6 +23,7 @@ except ImportError:
 SCOPES = [
     "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/calendar.readonly",
+    "https://www.googleapis.com/auth/spreadsheets.readonly",
 ]
 
 
@@ -141,6 +142,24 @@ def get_calendar_service(credentials: "Credentials"):
     if not GOOGLE_API_AVAILABLE:
         return None
     return build("calendar", "v3", credentials=credentials)
+
+
+def fetch_spreadsheet_values(
+    credentials: "Credentials",
+    spreadsheet_id: str,
+    range_name: str,
+) -> List[List[Any]]:
+    """非公開Googleスプレッドシートの指定範囲を取得する。"""
+    if not GOOGLE_API_AVAILABLE:
+        return []
+    service = build("sheets", "v4", credentials=credentials)
+    result = (
+        service.spreadsheets()
+        .values()
+        .get(spreadsheetId=spreadsheet_id, range=range_name)
+        .execute()
+    )
+    return result.get("values", [])
 
 
 def fetch_calendar_list(credentials: "Credentials") -> List[Dict]:

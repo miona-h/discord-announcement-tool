@@ -9,7 +9,12 @@ Discordオンラインイベント配信文章 自動生成ツール - Web版
 import streamlit as st
 import sys
 import os
-from datetime import date
+import csv
+import io
+import urllib.request
+import urllib.parse
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -18,6 +23,17 @@ from generate_announcement import AnnouncementGenerator
 from monthly_overview import build_monthly_overview
 from config import CALENDAR_EXCLUDE_TITLES
 from google.oauth2.credentials import Credentials
+
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+TEMPLATE_CSV_PATH = os.path.join(APP_DIR, "templates", "templates.csv")
+CHANNEL_CSV_PATH = os.path.join(APP_DIR, "templates", "channels.csv")
+TEMPLATE_CSV_FIELDS = ["event_type", "template", "channels"]
+CHANNEL_CSV_FIELDS = ["channel_name", "webhook_url", "enabled", "memo"]
+TEMPLATE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1d2BkB9xIQZnFVdiV7Bk-x3S2yA7XAmAgUPa79iLJrTo/edit?usp=sharing"
+TEMPLATE_SHEET_ID = "1d2BkB9xIQZnFVdiV7Bk-x3S2yA7XAmAgUPa79iLJrTo"
+TEMPLATE_SHEET_GID = "0"
+TEMPLATE_SHEET_RANGE = "テンプレート!A:C"
+CHANNEL_SHEET_RANGE = "配信先管理!A:D"
 
 try:
     from streamlit_oauth import OAuth2Component
@@ -37,6 +53,7 @@ try:
         fetch_calendar_list,
         fetch_upcoming_events,
         api_event_to_event_data,
+        fetch_spreadsheet_values,
     )
 except ImportError:
     GOOGLE_API_AVAILABLE = False
@@ -59,6 +76,7 @@ GOOGLE_SCOPE_LIST = [
     "profile",
     "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/calendar.readonly",
+    "https://www.googleapis.com/auth/spreadsheets.readonly",
 ]
 GOOGLE_SCOPE_STR = " ".join(GOOGLE_SCOPE_LIST)
 
@@ -71,7 +89,7 @@ def _use_streamlit_oauth() -> bool:
     return bool(st.secrets.get("GOOGLE_CLIENT_ID") and st.secrets.get("GOOGLE_CLIENT_SECRET"))
 
 
-def _get_channel_name(event_type: str) -> str:
+def _get_default_channel_name(event_type: str) -> str:
     """イベント種別からチャンネル名を返す"""
     if not event_type:
         return "交流会のお知らせ"
@@ -84,28 +102,280 @@ def _get_channel_name(event_type: str) -> str:
     return "交流会のお知らせ"
 
 
-def _get_channel_names(event_type: str) -> list[str]:
-    """イベント種別に応じた配信先一覧を返す"""
+def _split_channels(channels_text: str) -> list[str]:
+    """カンマ・改行区切りの配信先をリスト化する"""
+    if not channels_text:
+        return []
+    normalized = str(channels_text).replace("、", ",").replace("\n", ",")
+    return [ch.strip() for ch in normalized.split(",") if ch.strip()]
+
+
+def _join_channels(channels: list[str]) -> str:
+    return ", ".join([ch for ch in channels if ch])
+
+
+def _get_default_channel_names(event_type: str) -> list[str]:
+    """CSVに配信先がない場合のデフォルト配信先"""
     if "万垢生限定オン会" in str(event_type) or "万垢" in str(event_type):
         return ["万垢お知らせチャンネル", "講師お知らせ", "専属講師チーム"]
-    return [_get_channel_name(event_type)]
+    return [_get_default_channel_name(event_type)]
+
+
+def _load_template_records() -> list[dict]:
+    """テンプレートCSVから event_type/template/channels を読み込む"""
+    records = []
+    if not os.path.exists(TEMPLATE_CSV_PATH):
+        return records
+    try:
+        with open(TEMPLATE_CSV_PATH, "r", encoding="utf-8-sig", newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                event_type = (row.get("event_type") or "").strip()
+                template = (row.get("template") or "").strip()
+                if not event_type or not template:
+                    continue
+                channels = (row.get("channels") or "").strip()
+                if not channels:
+                    channels = _join_channels(_get_default_channel_names(event_type))
+                records.append({
+                    "event_type": event_type,
+                    "template": template,
+                    "channels": channels,
+                })
+    except Exception as e:
+        st.error(f"テンプレートCSVの読み込みに失敗しました: {e}")
+    return records
+
+
+def _parse_template_csv(text: str) -> list[dict]:
+    """Googleスプレッドシートから取得したCSVを検証する"""
+    reader = csv.DictReader(io.StringIO(text.lstrip("\ufeff")))
+    fieldnames = [str(name or "").strip() for name in (reader.fieldnames or [])]
+    required = {"event_type", "template", "channels"}
+    missing = required - set(fieldnames)
+    if missing:
+        raise ValueError(
+            "1行目に event_type, template, channels の3列が必要です。"
+            f" 不足: {', '.join(sorted(missing))}"
+        )
+
+    records = []
+    for row_number, row in enumerate(reader, start=2):
+        event_type = (row.get("event_type") or "").strip()
+        template = (row.get("template") or "").strip()
+        channels = (row.get("channels") or "").strip()
+        if not event_type and not template and not channels:
+            continue
+        if not event_type or not template:
+            raise ValueError(f"{row_number}行目: event_type と template は必須です。")
+        records.append({
+            "event_type": event_type,
+            "template": template,
+            "channels": channels or _join_channels(_get_default_channel_names(event_type)),
+        })
+    if not records:
+        raise ValueError("有効なテンプレートが1件もありません。")
+    return records
+
+
+def _sheet_values_to_records(values: list[list], fields: list[str]) -> list[dict]:
+    """スプレッドシートの行配列を辞書一覧に変換する"""
+    if not values:
+        return []
+    headers = [str(v).strip() for v in values[0]]
+    missing = set(fields) - set(headers)
+    if missing:
+        raise ValueError(f"必要な列がありません: {', '.join(sorted(missing))}")
+    records = []
+    for row_number, row in enumerate(values[1:], start=2):
+        padded = list(row) + [""] * max(0, len(headers) - len(row))
+        rec = {headers[i]: str(padded[i]).strip() for i in range(len(headers))}
+        if any(rec.get(field, "") for field in fields):
+            records.append(rec)
+    return records
+
+
+def _parse_template_sheet_values(values: list[list]) -> list[dict]:
+    records = _sheet_values_to_records(values, TEMPLATE_CSV_FIELDS)
+    normalized = []
+    for row_number, rec in enumerate(records, start=2):
+        event_type = rec.get("event_type", "").strip()
+        template = rec.get("template", "").strip()
+        channels = rec.get("channels", "").strip()
+        if not event_type or not template:
+            raise ValueError(f"テンプレート {row_number}行目: event_type と template は必須です。")
+        normalized.append({
+            "event_type": event_type,
+            "template": template,
+            "channels": channels or _join_channels(_get_default_channel_names(event_type)),
+        })
+    if not normalized:
+        raise ValueError("有効なテンプレートが1件もありません。")
+    return normalized
+
+
+def _parse_channel_sheet_values(values: list[list]) -> list[dict]:
+    records = _sheet_values_to_records(values, CHANNEL_CSV_FIELDS)
+    normalized = []
+    for rec in records:
+        channel_name = rec.get("channel_name", "").strip()
+        if not channel_name:
+            continue
+        normalized.append({
+            "channel_name": channel_name,
+            "webhook_url": rec.get("webhook_url", "").strip(),
+            "enabled": rec.get("enabled", "TRUE").strip() or "TRUE",
+            "memo": rec.get("memo", "").strip(),
+        })
+    if not normalized:
+        raise ValueError("有効な配信先が1件もありません。")
+    return normalized
+
+
+def _fetch_template_records_from_sheet() -> list[dict]:
+    """GoogleスプレッドシートをCSVとして手動取得する"""
+    query = urllib.parse.urlencode({
+        "format": "csv",
+        "gid": TEMPLATE_SHEET_GID,
+        "_": int(datetime.now().timestamp()),
+    })
+    export_url = f"https://docs.google.com/spreadsheets/d/{TEMPLATE_SHEET_ID}/export?{query}"
+    request = urllib.request.Request(export_url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(request, timeout=20) as response:
+        text = response.read().decode("utf-8-sig")
+    return _parse_template_csv(text)
+
+
+def _save_template_records(records: list[dict]) -> tuple[bool, str]:
+    """テンプレート一覧をCSVへ保存する"""
+    try:
+        os.makedirs(os.path.dirname(TEMPLATE_CSV_PATH), exist_ok=True)
+        tmp_path = TEMPLATE_CSV_PATH + ".tmp"
+        with open(tmp_path, "w", encoding="utf-8-sig", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=TEMPLATE_CSV_FIELDS)
+            writer.writeheader()
+            for rec in records:
+                event_type = (rec.get("event_type") or "").strip()
+                template = (rec.get("template") or "").strip()
+                channels = (rec.get("channels") or "").strip()
+                if event_type and template:
+                    writer.writerow({
+                        "event_type": event_type,
+                        "template": template,
+                        "channels": channels or _join_channels(_get_default_channel_names(event_type)),
+                    })
+        os.replace(tmp_path, TEMPLATE_CSV_PATH)
+        return True, "保存しました"
+    except Exception as e:
+        return False, str(e)
+
+
+def _save_channel_records(records: list[dict]) -> tuple[bool, str]:
+    """配信先マスタをローカルキャッシュへ保存する"""
+    try:
+        os.makedirs(os.path.dirname(CHANNEL_CSV_PATH), exist_ok=True)
+        tmp_path = CHANNEL_CSV_PATH + ".tmp"
+        with open(tmp_path, "w", encoding="utf-8-sig", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=CHANNEL_CSV_FIELDS)
+            writer.writeheader()
+            for rec in records:
+                writer.writerow({field: rec.get(field, "") for field in CHANNEL_CSV_FIELDS})
+        os.replace(tmp_path, CHANNEL_CSV_PATH)
+        return True, "保存しました"
+    except Exception as e:
+        return False, str(e)
+
+
+def _load_channel_records() -> list[dict]:
+    if not os.path.exists(CHANNEL_CSV_PATH):
+        return []
+    try:
+        with open(CHANNEL_CSV_PATH, "r", encoding="utf-8-sig", newline="") as f:
+            return [dict(row) for row in csv.DictReader(f) if (row.get("channel_name") or "").strip()]
+    except Exception as e:
+        st.error(f"配信先マスタの読み込みに失敗しました: {e}")
+        return []
+
+
+def _find_template_records(event_type: str) -> list[dict]:
+    """同じイベント種別のテンプレート行をすべて返す"""
+    target = str(event_type or "").strip()
+    return [rec for rec in _load_template_records() if rec.get("event_type") == target]
+
+
+def _get_channel_names(event_type: str) -> list[str]:
+    """イベント種別に応じた配信先一覧を返す"""
+    records = _find_template_records(event_type)
+    channels = []
+    for rec in records:
+        for ch in _split_channels(rec.get("channels", "")):
+            if ch not in channels:
+                channels.append(ch)
+    return channels or _get_default_channel_names(event_type)
+
+
+def _generate_announcement_items(generator: AnnouncementGenerator, event_data: dict) -> list[dict]:
+    """テンプレート行ごとに告知文と配信先を生成する"""
+    event_type = (event_data.get("event_type") or "").strip()
+    records = _find_template_records(event_type)
+    items = []
+    if records:
+        for rec in records:
+            msg = generator.generate_from_template(rec.get("template", ""), event_data)
+            if not msg:
+                continue
+            channels = _split_channels(rec.get("channels", "")) or _get_default_channel_names(event_type)
+            for channel in channels:
+                items.append({"message": msg, "channel": channel})
+    else:
+        msg = generator.generate(event_data)
+        if msg:
+            for channel in _get_default_channel_names(event_type):
+                items.append({"message": msg, "channel": channel})
+    return items
 
 
 def _get_post_date_time(event_type: str, event_date: str, event_time: str):
     """
-    当日告知＝開催当日 08:00 固定を返す。
+    当日告知＝開催当日08:00、事前告知＝前日18:00、まもなく開始＝当日開始15分前 を返す。
     戻り値: (日付文字列 "M/D", 時間文字列 "HH:MM")
     """
-    from datetime import datetime
+    from datetime import datetime, timedelta
     year = datetime.now().year
+    post_date_str, post_time_str = str(event_date), str(event_time)
     try:
         parts = str(event_date).strip().split("/")
         if len(parts) >= 2:
             m, d = int(parts[0]), int(parts[1])
-            return (f"{m}/{d}", "08:00")
-        return (event_date, "08:00")
+        else:
+            return (event_date, "18:00" if "事前告知" in str(event_type) else event_time)
+        if "当日告知" in str(event_type):
+            post_date_str = f"{m}/{d}"
+            post_time_str = "08:00"
+        elif "事前告知" in str(event_type):
+            event_dt = datetime(year, m, d)
+            prev = event_dt - timedelta(days=1)
+            post_date_str = f"{prev.month}/{prev.day}"
+            post_time_str = "18:00"
+        elif "間もなく開始" in str(event_type) or "まもなく" in str(event_type):
+            post_date_str = f"{m}/{d}"
+            t = str(event_time).strip()
+            if ":" in t:
+                parts_t = t.split(":")
+                h = int(parts_t[0])
+                mi = int(parts_t[1]) if len(parts_t) > 1 else 0
+                t_dt = datetime(year, m, d, h, mi) - timedelta(minutes=15)
+                post_date_str = f"{t_dt.month}/{t_dt.day}"
+                post_time_str = f"{t_dt.hour:02d}:{t_dt.minute:02d}"
+            else:
+                post_time_str = t
+        else:
+            post_date_str = f"{m}/{d}"
+            post_time_str = "18:00" if "事前告知" in str(event_type) else str(event_time)
     except Exception:
-        return (event_date, "08:00")
+        post_date_str = event_date
+        post_time_str = "08:00" if "当日告知" in str(event_type) else ("18:00" if "事前告知" in str(event_type) else event_time)
+    return (post_date_str, post_time_str)
 
 
 def _handle_oauth_callback():
@@ -159,9 +429,6 @@ if not GOOGLE_API_AVAILABLE:
 
 tabs = st.tabs(tab_names)
 tab_idx = 0
-
-if "custom_templates" not in st.session_state:
-    st.session_state["custom_templates"] = {}
 
 if GOOGLE_API_AVAILABLE:
     with tabs[tab_idx]:
@@ -326,22 +593,23 @@ if GOOGLE_API_AVAILABLE:
                     for k in ("_id", "_raw_summary", "_raw_description"):
                         ed.pop(k, None)
                     try:
-                        generator = AnnouncementGenerator(templates_override=st.session_state.get("custom_templates", {}))
+                        generator = AnnouncementGenerator()
                         is_valid, errors = generator.validate_event_data(ed)
                         if not is_valid:
                             st.warning("入力情報に不備があります（手動入力タブで補完してください）")
                             for err in errors:
                                 st.write(f"• {err}")
                         else:
-                            announcement = generator.generate(ed)
-                            if announcement:
+                            items = _generate_announcement_items(generator, ed)
+                            if items:
                                 st.success("告知文を生成しました！")
-                                st.text_area(
-                                    "生成された告知文（コピーしてDiscordに貼り付けてください）",
-                                    announcement,
-                                    height=400,
-                                    key="announcement_output_linked",
-                                )
+                                for item_idx, item in enumerate(items):
+                                    st.text_area(
+                                        f"生成された告知文｜配信先：{item['channel']}",
+                                        item["message"],
+                                        height=400,
+                                        key=f"announcement_output_linked_{item_idx}",
+                                    )
                                 st.caption("💡 上のテキストを選択して Ctrl+C（Mac: Cmd+C）でコピーできます")
                             else:
                                 st.error("告知文の生成に失敗しました")
@@ -351,33 +619,37 @@ if GOOGLE_API_AVAILABLE:
                 st.divider()
                 st.markdown("**1ヶ月分を一括生成してスプレッドシート用に出力**")
                 if st.button("📋 1ヶ月分の告知文を一括生成", type="primary", key="btn_bulk"):
-                    generator = AnnouncementGenerator(templates_override=st.session_state.get("custom_templates", {}))
+                    generator = AnnouncementGenerator()
                     rows = []
                     for ed in events_list:
                         ev_copy = ed.copy()
                         for k in ("_id", "_raw_summary", "_raw_description"):
                             ev_copy.pop(k, None)
-                        # 1件の予定につき「当日告知」1行を出力（開催当日 08:00）
-                        if "（事前告知）" in (ev_copy.get("event_type") or ""):
-                            ev_copy["event_type"] = ev_copy["event_type"].replace("（事前告知）", "（当日告知）")
-                        if "（間もなく開始）" in (ev_copy.get("event_type") or ""):
-                            ev_copy["event_type"] = ev_copy["event_type"].replace("（間もなく開始）", "（当日告知）")
-                        row_type = ev_copy.get("event_type", "")
-                        post_date, post_time = _get_post_date_time(
-                            row_type, ev_copy.get("date", ""), ev_copy.get("time", "")
-                        )
-                        is_valid = generator.validate_event_data(ev_copy)[0]
-                        if not is_valid:
-                            continue
-                        ann = generator.generate(ev_copy) or ""
-                        msg = (ann or "").replace("\r", "\n")
-                        for channel_name in _get_channel_names(row_type):
-                            rows.append({
-                                "メッセージ": msg,
-                                "日付": post_date,
-                                "時間": post_time,
-                                "チャンネル名": channel_name,
-                            })
+                        event_type = ev_copy.get("event_type", "")
+                        # 1件の予定につき「事前告知」と「まもなく開始」の2行を出力（全日程に適用）
+                        for is_soon in (False, True):
+                            if is_soon:
+                                if "（事前告知）" not in event_type:
+                                    continue
+                                ev_row = ev_copy.copy()
+                                ev_row["event_type"] = event_type.replace("（事前告知）", "（間もなく開始）")
+                            else:
+                                ev_row = ev_copy
+                            row_type = ev_row.get("event_type", "")
+                            post_date, post_time = _get_post_date_time(
+                                row_type, ev_row.get("date", ""), ev_row.get("time", "")
+                            )
+                            is_valid = generator.validate_event_data(ev_row)[0]
+                            if not is_valid:
+                                continue
+                            items = _generate_announcement_items(generator, ev_row)
+                            for item in items:
+                                rows.append({
+                                    "メッセージ": item["message"].replace("\r", "\n"),
+                                    "日付": post_date,
+                                    "時間": post_time,
+                                    "チャンネル名": item["channel"],
+                                })
                     if rows:
                         import io
                         import csv as csv_module
@@ -396,7 +668,7 @@ if GOOGLE_API_AVAILABLE:
                             mime="text/csv; charset=utf-8",
                             key="dl_bulk_csv",
                         )
-                        st.caption("💡 当日告知＝開催当日08:00。A列=メッセージ, B列=日付(投稿日), C列=時間(投稿時間), D列=チャンネル名。")
+                        st.caption("💡 当日告知＝開催当日08:00。事前告知＝前日18:00。まもなく開始＝開始15分前。A列=メッセージ, B列=日付(投稿日), C列=時間(投稿時間), D列=チャンネル名。")
                     else:
                         st.warning("生成できる予定がありませんでした。")
 
@@ -429,20 +701,19 @@ if GOOGLE_API_AVAILABLE:
 
 with tabs[tab_idx]:
     st.markdown("**イベント情報を手動で入力**")
-    _gen = AnnouncementGenerator(templates_override=st.session_state.get("custom_templates", {}))
-    _event_type_options = sorted(_gen.templates.keys()) or [
-                "ジャンル特化グルコン（当日告知）",
-                "万垢生限定オン会（当日告知）",
-                "生徒対談（当日告知）",
-                "講師対談（当日告知）",
-                "オン会（当日告知）",
+    _template_records_for_select = _load_template_records()
+    _event_type_options = sorted(set([rec["event_type"] for rec in _template_records_for_select])) or [
+                "ジャンル特化グルコン（事前告知）", "ジャンル特化グルコン（間もなく開始）",
+                "万垢生限定オン会（事前告知）", "万垢生限定オン会（間もなく開始）",
+                "生徒対談（事前告知）", "生徒対談（間もなく開始）",
+                "講師対談（事前告知）", "講師対談（間もなく開始）",
+                "オン会（事前告知）", "オン会（間もなく開始）",
             ]
     col1, col2 = st.columns(2)
     with col1:
         manual_event_type = st.selectbox(
             "イベント種別",
             _event_type_options,
-            format_func=lambda x: x + " ※追加" if x in st.session_state.get("custom_templates", {}) else x,
         )
         manual_date = st.text_input("開催日", placeholder="例: 1/31")
         manual_time = st.text_input("開始時間", placeholder="例: 12:00")
@@ -453,78 +724,86 @@ with tabs[tab_idx]:
 
 tab_idx += 1
 with tabs[tab_idx]:
-    st.markdown("**📝 テンプレートの追加・編集**")
-    st.caption("現在のテンプレートを一覧表示し、編集できます。追加・編集した内容はこのセッション中のみ有効です。永続化する場合は「CSVでダウンロード」して templates/templates.csv に反映してください。")
-    custom = st.session_state.get("custom_templates", {})
-    base_gen = AnnouncementGenerator()
-    all_templates = {**base_gen.templates, **custom}
+    st.markdown("**📝 テンプレート管理**")
+    st.caption("テンプレートの追加・修正・削除はGoogleスプレッドシートで行い、変更後に「ツールへ反映」を押してください。自動更新は行いません。")
 
-    st.subheader("現在使用中のテンプレート一覧")
-    if "editing_template" not in st.session_state:
-        st.session_state["editing_template"] = None
-    editing = st.session_state.get("editing_template")
-
-    if all_templates:
-        for i, (event_type, body) in enumerate(sorted(all_templates.items())):
-            is_custom = event_type in custom
-            with st.expander(f"**{event_type}**" + (" ※編集済み" if is_custom else ""), expanded=(editing == event_type)):
-                if editing == event_type:
-                    new_body = st.text_area("テンプレート本文を編集", body, height=250, key=f"edit_body_{i}")
-                    col1, col2, _ = st.columns([1, 1, 2])
-                    with col1:
-                        if st.button("保存", key=f"save_edit_{i}"):
-                            custom[event_type] = new_body
-                            st.session_state["custom_templates"] = custom
-                            st.session_state["editing_template"] = None
-                            st.rerun()
-                    with col2:
-                        if st.button("キャンセル", key=f"cancel_edit_{i}"):
-                            st.session_state["editing_template"] = None
-                            st.rerun()
-                    if is_custom:
-                        if st.button("このテンプレートを削除", key=f"del_edit_{i}"):
-                            del custom[event_type]
-                            st.session_state["custom_templates"] = custom
-                            st.session_state["editing_template"] = None
-                            st.rerun()
-                else:
-                    st.text_area("本文", body[:500] + ("..." if len(body) > 500 else ""), height=120, key=f"preview_{i}", disabled=True)
-                    if st.button("編集", key=f"btn_edit_{i}"):
-                        st.session_state["editing_template"] = event_type
-                        st.rerun()
-                    if is_custom:
-                        if st.button("デフォルトに戻す", key=f"reset_{i}"):
-                            del custom[event_type]
-                            st.session_state["custom_templates"] = custom
-                            st.rerun()
-    else:
-        st.info("テンプレートがありません。下の「テンプレートを追加」で追加してください。")
-
-    st.subheader("テンプレートを追加")
-    with st.form("add_template_form", clear_on_submit=True):
-        new_event_type = st.text_input("イベント種別名", placeholder="例: 特別講義（当日告知）")
-        new_template = st.text_area("テンプレート本文", placeholder="@everyone\n\n## 明日{{date}}の{{time}}より特別講義が開催されます...\n\n利用可能な変数: {{date}}, {{time}}, {{teacher_name}}, {{instagram_url}}, {{zoom_url}}, {{genre}} など", height=200)
-        if st.form_submit_button("追加"):
-            if new_event_type and new_template:
-                custom[new_event_type.strip()] = new_template.strip()
-                st.session_state["custom_templates"] = custom
-                st.success(f"「{new_event_type.strip()}」を追加しました。")
+    link_col, sync_col = st.columns([1, 1])
+    with link_col:
+        st.markdown(f"[📊 Googleスプレッドシートを開く]({TEMPLATE_SHEET_URL})")
+    with sync_col:
+        if st.button("🔄 スプレッドシートの変更をツールへ反映", type="primary", use_container_width=True):
+            try:
+                creds_dict = st.session_state.get("google_credentials")
+                if not creds_dict:
+                    raise RuntimeError("先に「Googleカレンダーと連携」からGoogleに連携してください。")
+                creds = dict_to_credentials(creds_dict)
+                creds, updated = refresh_credentials_if_needed(creds)
+                if updated:
+                    st.session_state["google_credentials"] = updated
+                template_values = fetch_spreadsheet_values(creds, TEMPLATE_SHEET_ID, TEMPLATE_SHEET_RANGE)
+                channel_values = fetch_spreadsheet_values(creds, TEMPLATE_SHEET_ID, CHANNEL_SHEET_RANGE)
+                sheet_records = _parse_template_sheet_values(template_values)
+                channel_records = _parse_channel_sheet_values(channel_values)
+                ok, msg = _save_template_records(sheet_records)
+                if not ok:
+                    raise RuntimeError(msg)
+                ok, msg = _save_channel_records(channel_records)
+                if not ok:
+                    raise RuntimeError(msg)
+                updated_at = datetime.now(ZoneInfo("Asia/Tokyo")).strftime("%Y/%m/%d %H:%M:%S")
+                st.session_state["template_sheet_synced_at"] = updated_at
+                st.session_state["template_sheet_sync_message"] = (
+                    f"テンプレート{len(sheet_records)}件、配信先{len(channel_records)}件を反映しました。"
+                )
                 st.rerun()
-            else:
-                st.warning("イベント種別名とテンプレート本文を入力してください。")
+            except Exception as e:
+                st.error(f"スプレッドシートの反映に失敗しました: {e}")
+
+    if st.session_state.get("template_sheet_synced_at"):
+        message = st.session_state.get("template_sheet_sync_message", "")
+        st.info(f"{message} 最終反映：{st.session_state['template_sheet_synced_at']}")
+
+    st.markdown(
+        "**スプレッドシートの列**  \n"
+        "A列 `event_type`：イベント種別名　/　"
+        "B列 `template`：メッセージ本文　/　"
+        "C列 `channels`：配信先（複数はカンマ区切り）"
+    )
+
+    channel_records = _load_channel_records()
+    st.subheader("配信先マスタ")
+    st.caption("追加・修正はスプレッドシートの「配信先管理」で行います。Webhook URLはこの画面に表示しません。")
+    if channel_records:
+        for rec in channel_records:
+            enabled = str(rec.get("enabled", "")).upper() not in {"FALSE", "0", "OFF", "NO"}
+            webhook_status = "設定済み" if rec.get("webhook_url") else "未設定"
+            icon = "✅" if enabled else "⏸️"
+            st.write(f"{icon} {rec['channel_name']} ｜ Webhook: {webhook_status}")
+    else:
+        st.info("配信先マスタはまだツールに反映されていません。")
+
+    template_records = _load_template_records()
+    st.subheader("現在ツールに反映中のテンプレート")
+    if template_records:
+        for i, rec in enumerate(template_records):
+            event_type = rec["event_type"]
+            body = rec["template"]
+            channels = rec.get("channels", "")
+            with st.expander(f"**{event_type}**｜配信先：{channels}"):
+                st.text_area("本文プレビュー", body, height=240, key=f"preview_{i}", disabled=True)
+    else:
+        st.warning("反映中のテンプレートがありません。")
 
     st.subheader("CSVでダウンロード")
-    if all_templates:
-        import io
-        import csv as csv_module
+    if template_records:
         buf = io.StringIO()
-        w = csv_module.writer(buf)
-        w.writerow(["event_type", "template"])
-        for et, tmpl in sorted(all_templates.items()):
-            w.writerow([et, tmpl])
+        w = csv.DictWriter(buf, fieldnames=TEMPLATE_CSV_FIELDS)
+        w.writeheader()
+        for rec in template_records:
+            w.writerow(rec)
         csv_bytes = buf.getvalue().encode("utf-8-sig")
         st.download_button("現在のテンプレート一式をCSVでダウンロード", csv_bytes, file_name="templates.csv", mime="text/csv; charset=utf-8", key="dl_templates_csv")
-        st.caption("ダウンロードしたCSVを templates/templates.csv に置き換えると、次回以降もその内容がデフォルトになります。")
+        st.caption("バックアップ用です。通常の編集・追加・削除はGoogleスプレッドシートで行います。")
 
 if st.button("📝 告知文を生成", type="primary", key="btn_generate"):
     event_data = {
@@ -544,22 +823,23 @@ if st.button("📝 告知文を生成", type="primary", key="btn_generate"):
 
     if event_data:
         try:
-            generator = AnnouncementGenerator(templates_override=st.session_state.get("custom_templates", {}))
+            generator = AnnouncementGenerator()
             is_valid, errors = generator.validate_event_data(event_data)
             if not is_valid:
                 st.warning("入力情報に不備があります")
                 for err in errors:
                     st.write(f"• {err}")
             else:
-                announcement = generator.generate(event_data)
-                if announcement:
+                items = _generate_announcement_items(generator, event_data)
+                if items:
                     st.success("告知文を生成しました！")
-                    st.text_area(
-                        "生成された告知文（コピーしてDiscordに貼り付けてください）",
-                        announcement,
-                        height=400,
-                        key="announcement_output",
-                    )
+                    for item_idx, item in enumerate(items):
+                        st.text_area(
+                            f"生成された告知文｜配信先：{item['channel']}",
+                            item["message"],
+                            height=400,
+                            key=f"announcement_output_{item_idx}",
+                        )
                     st.caption("💡 上のテキストを選択して Ctrl+C（Mac: Cmd+C）でコピーできます")
                 else:
                     st.error("告知文の生成に失敗しました")
