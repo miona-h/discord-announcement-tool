@@ -255,6 +255,16 @@ def _save_template_records(records: list[dict]) -> tuple[bool, str]:
         return False, str(e)
 
 
+def _sync_templates_from_google_sheet(creds) -> int:
+    """Googleスプレッドシートの最新版を取得してローカルキャッシュへ反映する。"""
+    template_values = fetch_spreadsheet_values(creds, TEMPLATE_SHEET_ID, TEMPLATE_SHEET_RANGE)
+    sheet_records = _parse_template_sheet_values(template_values)
+    ok, msg = _save_template_records(sheet_records)
+    if not ok:
+        raise RuntimeError(msg)
+    return len(sheet_records)
+
+
 def _keyword_groups(text: str) -> list[list[str]]:
     """判定キーワードを解析する。カンマ区切りはAND、|区切りはOR。"""
     groups = []
@@ -414,6 +424,27 @@ def _handle_oauth_callback():
 if GOOGLE_API_AVAILABLE and not _use_streamlit_oauth():
     _handle_oauth_callback()
 
+# ページを開き直した際は、そのセッションでGoogle連携が確認でき次第、
+# スプレッドシートの最新版を1回だけ自動取得する。
+if GOOGLE_API_AVAILABLE and st.session_state.get("google_credentials"):
+    if not st.session_state.get("template_sheet_auto_loaded"):
+        try:
+            auto_creds = dict_to_credentials(st.session_state["google_credentials"])
+            auto_creds, updated = refresh_credentials_if_needed(auto_creds)
+            if updated is not None:
+                st.session_state["google_credentials"] = updated
+            auto_count = _sync_templates_from_google_sheet(auto_creds)
+            updated_at = datetime.now(ZoneInfo("Asia/Tokyo")).strftime("%Y/%m/%d %H:%M:%S")
+            st.session_state["template_sheet_synced_at"] = updated_at
+            st.session_state["template_sheet_sync_message"] = (
+                f"リロード時にスプレッドシート最新版を{auto_count}件反映しました。"
+            )
+            st.session_state["template_sheet_auto_loaded"] = True
+            st.session_state.pop("template_sheet_auto_error", None)
+        except Exception as e:
+            # カレンダー等の利用は止めず、テンプレート管理タブで再試行できるようにする。
+            st.session_state["template_sheet_auto_error"] = str(e)
+
 tab_names = ["🔗 Googleカレンダーと連携", "✏️ 手動入力", "📝 テンプレート管理"]
 if not GOOGLE_API_AVAILABLE:
     tab_names = ["✏️ 手動入力", "📝 テンプレート管理"]
@@ -513,6 +544,8 @@ if GOOGLE_API_AVAILABLE:
                 st.success("Googleカレンダーと連携済みです")
             if st.button("🔓 連携を解除"):
                 del st.session_state["google_credentials"]
+                st.session_state.pop("template_sheet_auto_loaded", None)
+                st.session_state.pop("template_sheet_auto_error", None)
                 if "calendar_events" in st.session_state:
                     del st.session_state["calendar_events"]
                 if "calendar_list" in st.session_state:
@@ -767,16 +800,14 @@ with tabs[tab_idx]:
                 creds, updated = refresh_credentials_if_needed(creds)
                 if updated:
                     st.session_state["google_credentials"] = updated
-                template_values = fetch_spreadsheet_values(creds, TEMPLATE_SHEET_ID, TEMPLATE_SHEET_RANGE)
-                sheet_records = _parse_template_sheet_values(template_values)
-                ok, msg = _save_template_records(sheet_records)
-                if not ok:
-                    raise RuntimeError(msg)
+                synced_count = _sync_templates_from_google_sheet(creds)
                 updated_at = datetime.now(ZoneInfo("Asia/Tokyo")).strftime("%Y/%m/%d %H:%M:%S")
                 st.session_state["template_sheet_synced_at"] = updated_at
                 st.session_state["template_sheet_sync_message"] = (
-                    f"テンプレートと判定ルールを{len(sheet_records)}件反映しました。"
+                    f"テンプレートと判定ルールを{synced_count}件反映しました。"
                 )
+                st.session_state["template_sheet_auto_loaded"] = True
+                st.session_state.pop("template_sheet_auto_error", None)
                 st.rerun()
             except Exception as e:
                 st.error(f"スプレッドシートの反映に失敗しました: {e}")
@@ -784,6 +815,12 @@ with tabs[tab_idx]:
     if st.session_state.get("template_sheet_synced_at"):
         message = st.session_state.get("template_sheet_sync_message", "")
         st.info(f"{message} 最終反映：{st.session_state['template_sheet_synced_at']}")
+    if st.session_state.get("template_sheet_auto_error"):
+        st.warning(
+            "リロード時の自動取得に失敗しました。Google連携を確認して、"
+            "「スプレッドシートの変更をツールへ反映」を押してください。\n\n"
+            f"詳細: {st.session_state['template_sheet_auto_error']}"
+        )
 
     st.markdown(
         "**スプレッドシートの列**  \n"
