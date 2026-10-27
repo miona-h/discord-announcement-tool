@@ -27,11 +27,11 @@ from google.oauth2.credentials import Credentials
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATE_CSV_PATH = os.path.join(APP_DIR, "templates", "templates.csv")
-TEMPLATE_CSV_FIELDS = ["event_type", "template", "channels", "match_keywords"]
+TEMPLATE_CSV_FIELDS = ["event_type", "template", "channels", "match_keywords", "delivery_time"]
 TEMPLATE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1d2BkB9xIQZnFVdiV7Bk-x3S2yA7XAmAgUPa79iLJrTo/edit?usp=sharing"
 TEMPLATE_SHEET_ID = "1d2BkB9xIQZnFVdiV7Bk-x3S2yA7XAmAgUPa79iLJrTo"
 TEMPLATE_SHEET_GID = "0"
-TEMPLATE_SHEET_RANGE = "テンプレート!A:D"
+TEMPLATE_SHEET_RANGE = "テンプレート!A:E"
 
 try:
     from streamlit_oauth import OAuth2Component
@@ -120,7 +120,7 @@ def _get_default_channel_names(event_type: str) -> list[str]:
 
 
 def _load_template_records() -> list[dict]:
-    """テンプレートCSVから event_type/template/channels/match_keywords を読み込む"""
+    """テンプレートCSVからテンプレート本文・判定条件・配信タイミングを読み込む"""
     records = []
     if not os.path.exists(TEMPLATE_CSV_PATH):
         return records
@@ -140,6 +140,7 @@ def _load_template_records() -> list[dict]:
                     "template": template,
                     "channels": channels,
                     "match_keywords": (row.get("match_keywords") or "").strip(),
+                    "delivery_time": (row.get("delivery_time") or "").strip(),
                 })
     except Exception as e:
         st.error(f"テンプレートCSVの読み込みに失敗しました: {e}")
@@ -150,11 +151,11 @@ def _parse_template_csv(text: str) -> list[dict]:
     """Googleスプレッドシートから取得したCSVを検証する"""
     reader = csv.DictReader(io.StringIO(text.lstrip("\ufeff")))
     fieldnames = [str(name or "").strip() for name in (reader.fieldnames or [])]
-    required = {"event_type", "template", "channels", "match_keywords"}
+    required = {"event_type", "template", "channels", "match_keywords", "delivery_time"}
     missing = required - set(fieldnames)
     if missing:
         raise ValueError(
-            "1行目に event_type, template, channels, match_keywords の4列が必要です。"
+            "1行目に event_type, template, channels, match_keywords, delivery_time の5列が必要です。"
             f" 不足: {', '.join(sorted(missing))}"
         )
 
@@ -164,7 +165,8 @@ def _parse_template_csv(text: str) -> list[dict]:
         template = (row.get("template") or "").strip()
         channels = (row.get("channels") or "").strip()
         match_keywords = (row.get("match_keywords") or "").strip()
-        if not event_type and not template and not channels and not match_keywords:
+        delivery_time = (row.get("delivery_time") or "").strip()
+        if not event_type and not template and not channels and not match_keywords and not delivery_time:
             continue
         if not event_type or not template:
             raise ValueError(f"{row_number}行目: event_type と template は必須です。")
@@ -173,6 +175,7 @@ def _parse_template_csv(text: str) -> list[dict]:
             "template": template,
             "channels": channels or _join_channels(_get_default_channel_names(event_type)),
             "match_keywords": match_keywords,
+            "delivery_time": delivery_time,
         })
     if not records:
         raise ValueError("有効なテンプレートが1件もありません。")
@@ -210,6 +213,7 @@ def _parse_template_sheet_values(values: list[list]) -> list[dict]:
             "template": template,
             "channels": channels or _join_channels(_get_default_channel_names(event_type)),
             "match_keywords": rec.get("match_keywords", "").strip(),
+            "delivery_time": rec.get("delivery_time", "").strip(),
         })
     if not normalized:
         raise ValueError("有効なテンプレートが1件もありません。")
@@ -248,6 +252,7 @@ def _save_template_records(records: list[dict]) -> tuple[bool, str]:
                         "template": template,
                         "channels": channels or _join_channels(_get_default_channel_names(event_type)),
                         "match_keywords": (rec.get("match_keywords") or "").strip(),
+                        "delivery_time": (rec.get("delivery_time") or "").strip(),
                     })
         os.replace(tmp_path, TEMPLATE_CSV_PATH)
         return True, "保存しました"
@@ -327,18 +332,24 @@ def _generate_announcement_items(generator: AnnouncementGenerator, event_data: d
                 continue
             channels = _split_channels(rec.get("channels", "")) or _get_default_channel_names(event_type)
             for channel in channels:
-                items.append({"message": msg, "channel": channel})
+                items.append({
+                    "message": msg,
+                    "channel": channel,
+                    "delivery_time": (rec.get("delivery_time") or "").strip(),
+                })
     else:
         msg = generator.generate(event_data)
         if msg:
             for channel in _get_default_channel_names(event_type):
-                items.append({"message": msg, "channel": channel})
+                items.append({"message": msg, "channel": channel, "delivery_time": ""})
     return items
 
 
-def _get_post_date_time(event_type: str, event_date: str, event_time: str):
+def _get_post_date_time(event_type: str, event_date: str, event_time: str, delivery_time: str = ""):
     """
-    当日告知＝開催当日08:00、事前告知＝前日18:00、まもなく開始＝当日開始15分前 を返す。
+    delivery_time があればスプレッドシート設定を優先する。
+    対応形式: HH:MM / 当日HH:MM / 前日HH:MM / 15分前 / 開始15分前。
+    空欄の場合は従来どおりイベント種別から判定する。
     戻り値: (日付文字列 "M/D", 時間文字列 "HH:MM")
     """
     from datetime import datetime, timedelta
@@ -350,11 +361,25 @@ def _get_post_date_time(event_type: str, event_date: str, event_time: str):
             m, d = int(parts[0]), int(parts[1])
         else:
             return (event_date, "18:00" if "事前告知" in str(event_type) else event_time)
+        event_dt = datetime(year, m, d)
+        setting = re.sub(r"\s+", "", str(delivery_time or "").strip())
+        relative_match = re.fullmatch(r"(?:開始)?(\d+)分前", setting)
+        fixed_match = re.fullmatch(r"(?:(前日|当日))?(\d{1,2}):(\d{2})", setting)
+        if relative_match:
+            t = str(event_time).strip()
+            if ":" in t:
+                h, mi = [int(v) for v in t.split(":", 1)]
+                post_dt = datetime(year, m, d, h, mi) - timedelta(minutes=int(relative_match.group(1)))
+                return (f"{post_dt.month}/{post_dt.day}", f"{post_dt.hour:02d}:{post_dt.minute:02d}")
+        elif fixed_match:
+            day_label, hour, minute = fixed_match.groups()
+            post_dt = event_dt - timedelta(days=1 if day_label == "前日" else 0)
+            return (f"{post_dt.month}/{post_dt.day}", f"{int(hour):02d}:{int(minute):02d}")
+
         if "当日告知" in str(event_type):
             post_date_str = f"{m}/{d}"
             post_time_str = "08:00"
         elif "事前告知" in str(event_type):
-            event_dt = datetime(year, m, d)
             prev = event_dt - timedelta(days=1)
             post_date_str = f"{prev.month}/{prev.day}"
             post_time_str = "18:00"
@@ -675,14 +700,17 @@ if GOOGLE_API_AVAILABLE:
                             else:
                                 ev_row = ev_copy
                             row_type = ev_row.get("event_type", "")
-                            post_date, post_time = _get_post_date_time(
-                                row_type, ev_row.get("date", ""), ev_row.get("time", "")
-                            )
                             is_valid = generator.validate_event_data(ev_row)[0]
                             if not is_valid:
                                 continue
                             items = _generate_announcement_items(generator, ev_row)
                             for item in items:
+                                post_date, post_time = _get_post_date_time(
+                                    row_type,
+                                    ev_row.get("date", ""),
+                                    ev_row.get("time", ""),
+                                    item.get("delivery_time", ""),
+                                )
                                 rows.append({
                                     "メッセージ": item["message"].replace("\r", "\n"),
                                     "日付": post_date,
@@ -785,7 +813,7 @@ with tabs[tab_idx]:
 tab_idx += 1
 with tabs[tab_idx]:
     st.markdown("**📝 テンプレート管理**")
-    st.caption("テンプレートの追加・修正・削除はGoogleスプレッドシートで行い、変更後に「ツールへ反映」を押してください。自動更新は行いません。")
+    st.caption("テンプレートの追加・修正・削除はGoogleスプレッドシートで行います。リロード時に最新版を自動取得し、すぐ反映したい場合は「ツールへ反映」を押してください。")
 
     link_col, sync_col = st.columns([1, 1])
     with link_col:
@@ -827,12 +855,14 @@ with tabs[tab_idx]:
         "A列 `event_type`：イベント種別名　/　"
         "B列 `template`：メッセージ本文　/　"
         "C列 `channels`：配信先（複数はカンマ区切り）　/　"
-        "D列 `match_keywords`：判定キーワード（カンマ区切りはAND、`|`区切りはOR）"
+        "D列 `match_keywords`：判定キーワード（カンマ区切りはAND、`|`区切りはOR）　/　"
+        "E列 `delivery_time`：配信タイミング"
     )
 
     st.caption(
         "例：フォロワー別グルコンは `フォロワー別,グルコン`、通常のグルコンは `グルコン`。"
-        "複数キーワードのルールが自動的に優先されます。"
+        "複数キーワードのルールが自動的に優先されます。配信タイミングは `08:00`、"
+        "`前日18:00`、`15分前` の形式で設定できます。"
     )
 
     template_records = _load_template_records()
@@ -843,8 +873,10 @@ with tabs[tab_idx]:
             body = rec["template"]
             channels = rec.get("channels", "")
             match_keywords = rec.get("match_keywords", "") or "（設定なし）"
+            delivery_time = rec.get("delivery_time", "") or "（イベント種別から自動判定）"
             with st.expander(f"**{event_type}**｜配信先：{channels}"):
                 st.caption(f"判定キーワード：{match_keywords}")
+                st.caption(f"配信タイミング：{delivery_time}")
                 st.text_area("本文プレビュー", body, height=240, key=f"preview_{i}", disabled=True)
     else:
         st.warning("反映中のテンプレートがありません。")
