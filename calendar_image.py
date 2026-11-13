@@ -31,10 +31,26 @@ DEFAULT_CATEGORY_STYLES = {
 }
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-SNSCLUB_LOGO_ASSET = os.path.join(BASE_DIR, "calendar_assets", "snsclub_logo.jpg")
-HEADER_CHARACTER_ASSET = os.path.join(BASE_DIR, "calendar_assets", "header_character_wave.png")
-NOTO_SANS_JP_FONT = os.path.join(BASE_DIR, "fonts", "NotoSansJP-Variable.ttf")
-ROUNDED_TITLE_FONT = os.path.join(BASE_DIR, "fonts", "Baloo2-Variable.ttf")
+
+
+def _first_existing_path(*relative_paths: str) -> str:
+    """GitHub直下配置とサブフォルダ配置の両方に対応する。"""
+    candidates = [os.path.join(BASE_DIR, path) for path in relative_paths]
+    return next((path for path in candidates if os.path.exists(path)), candidates[0])
+
+
+SNSCLUB_LOGO_ASSET = _first_existing_path(
+    os.path.join("calendar_assets", "snsclub_logo.jpg"), "snsclub_logo.jpg"
+)
+HEADER_CHARACTER_ASSET = _first_existing_path(
+    os.path.join("calendar_assets", "header_character_wave.png"), "header_character_wave.png"
+)
+NOTO_SANS_JP_FONT = _first_existing_path(
+    os.path.join("fonts", "NotoSansJP-Variable.ttf"), "NotoSansJP-Variable.ttf"
+)
+ROUNDED_TITLE_FONT = _first_existing_path(
+    os.path.join("fonts", "Baloo2-Variable.ttf"), "Baloo2-Variable.ttf"
+)
 
 
 def classify_event(event: Dict[str, Any]) -> str:
