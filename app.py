@@ -17,6 +17,7 @@ import urllib.request
 import urllib.parse
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
+from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -25,6 +26,7 @@ from generate_announcement import AnnouncementGenerator
 from monthly_overview import build_monthly_overview
 from calendar_image import (
     DEFAULT_CATEGORY_STYLES,
+    calendar_event_key_at_point,
     classify_event,
     event_display_text,
     fetch_instagram_profile_image,
@@ -49,6 +51,12 @@ try:
     STREAMLIT_OAUTH_AVAILABLE = True
 except Exception:
     STREAMLIT_OAUTH_AVAILABLE = False
+
+try:
+    from streamlit_image_coordinates import streamlit_image_coordinates
+    IMAGE_COORDINATES_AVAILABLE = True
+except ImportError:
+    IMAGE_COORDINATES_AVAILABLE = False
 
 # Googleカレンダー連携（オプション）
 try:
@@ -947,28 +955,76 @@ if GOOGLE_API_AVAILABLE:
 
                 st.markdown("### 🖼️ 画像プレビュー編集")
                 st.caption(
-                    "予定を選択し、画像に表示する改行・文字と講師画像（またはイベント画像）を設定できます。"
+                    "カレンダー画像内の予定を直接クリックすると、文字・画像・背景色を編集できます。"
                 )
                 target_key = f"calendar_text_edit_target_{int(image_year)}_{int(image_month)}"
                 if target_key not in st.session_state or st.session_state[target_key] >= len(month_events):
                     st.session_state[target_key] = 0
-                st.caption("編集したい予定をクリックしてください")
-                preview_columns = st.columns(4)
+
+                preview_events = []
+                preview_event_images = {}
+                event_index_by_key = {}
                 for event_index, event in enumerate(month_events):
-                    event_label = (
-                        f"{event.get('date', '')} {event.get('time', '')}\n"
-                        f"{event.get('_raw_summary', '') or event.get('event_name', '')}"
+                    event_id = calendar_event_key(event, event_index)
+                    event_index_by_key[event_id] = event_index
+                    event_copy = event.copy()
+                    event_copy["_calendar_image_key"] = event_id
+                    text_key = f"calendar_display_text_{int(image_year)}_{int(image_month)}_{event_id}"
+                    event_copy["_calendar_display_text"] = st.session_state.get(
+                        text_key, event_display_text(event)
                     )
-                    with preview_columns[event_index % 4]:
-                        if st.button(
-                            event_label,
-                            key=f"calendar_event_card_{int(image_year)}_{int(image_month)}_{event_index}",
-                            type="primary" if st.session_state[target_key] == event_index else "secondary",
-                            use_container_width=True,
-                        ):
-                            if st.session_state[target_key] != event_index:
-                                st.session_state[target_key] = event_index
+                    other_color_key = f"calendar_event_other_color_{int(image_year)}_{int(image_month)}_{event_id}"
+                    if classify_event(event_copy) == "その他":
+                        event_copy["_calendar_background_color"] = st.session_state.get(
+                            other_color_key, DEFAULT_CATEGORY_STYLES["その他"]
+                        )
+                    image_path_key = f"calendar_event_library_path_{int(image_year)}_{int(image_month)}_{event_id}"
+                    image_path = st.session_state.get(image_path_key)
+                    if image_path:
+                        image_data = _read_saved_asset(image_path)
+                        if image_data:
+                            preview_event_images[event_id] = image_data
+                    preview_events.append(event_copy)
+
+                preview_png = generate_calendar_image(
+                    preview_events,
+                    int(image_year),
+                    int(image_month),
+                    category_colors={
+                        category: st.session_state.get(f"calendar_color_{category}", default_color)
+                        for category, default_color in DEFAULT_CATEGORY_STYLES.items()
+                    },
+                    event_images=preview_event_images,
+                )
+                st.caption("編集したい予定の枠内をクリックしてください")
+                if IMAGE_COORDINATES_AVAILABLE:
+                    preview_width = 700
+                    click_value = streamlit_image_coordinates(
+                        Image.open(io.BytesIO(preview_png)),
+                        width=preview_width,
+                        key=f"calendar_click_preview_{int(image_year)}_{int(image_month)}",
+                    )
+                    if click_value and "x" in click_value and "y" in click_value:
+                        click_signature = repr(click_value)
+                        processed_key = f"calendar_processed_click_{int(image_year)}_{int(image_month)}"
+                        if st.session_state.get(processed_key) != click_signature:
+                            st.session_state[processed_key] = click_signature
+                            scale = 1080 / preview_width
+                            clicked_event_key = calendar_event_key_at_point(
+                                preview_events,
+                                int(image_year),
+                                int(image_month),
+                                float(click_value["x"]) * scale,
+                                float(click_value["y"]) * scale,
+                            )
+                            if clicked_event_key in event_index_by_key:
+                                st.session_state[target_key] = event_index_by_key[clicked_event_key]
                                 st.rerun()
+                else:
+                    st.image(preview_png, width=700)
+                    st.warning(
+                        "画像クリック機能の追加ライブラリが未導入です。requirements.txtを更新して再デプロイしてください。"
+                    )
                 edit_index = int(st.session_state[target_key])
                 selected_event = month_events[edit_index]
                 selected_event_id = calendar_event_key(selected_event, edit_index)
@@ -986,6 +1042,17 @@ if GOOGLE_API_AVAILABLE:
                         height=180,
                         key=selected_text_key,
                     )
+                    if classify_event(selected_event) == "その他":
+                        selected_other_color_key = (
+                            f"calendar_event_other_color_{int(image_year)}_{int(image_month)}_{selected_event_id}"
+                        )
+                        if selected_other_color_key not in st.session_state:
+                            st.session_state[selected_other_color_key] = DEFAULT_CATEGORY_STYLES["その他"]
+                        st.color_picker(
+                            "この予定の背景色",
+                            key=selected_other_color_key,
+                            help="「その他」に分類された予定だけ、予定ごとに色を設定できます。",
+                        )
                 with image_column:
                     uploaded_event_image = st.file_uploader(
                         "ライブラリへ画像を追加",
@@ -1033,6 +1100,11 @@ if GOOGLE_API_AVAILABLE:
                         text_key, event_display_text(event)
                     )
                     event_copy["_calendar_image_key"] = event_id
+                    other_color_key = f"calendar_event_other_color_{int(image_year)}_{int(image_month)}_{event_id}"
+                    if classify_event(event_copy) == "その他":
+                        event_copy["_calendar_background_color"] = st.session_state.get(
+                            other_color_key, DEFAULT_CATEGORY_STYLES["その他"]
+                        )
                     selected_path = st.session_state.get(image_path_key)
                     if selected_path:
                         image_data = _read_saved_asset(selected_path)

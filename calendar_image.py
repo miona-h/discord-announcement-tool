@@ -192,9 +192,14 @@ def _event_text_lines(event: Dict[str, Any], max_chars: int = 9) -> List[str]:
                 if label:
                     lines.append(f"【{label}】")
     elif category == "対談":
-        talk_type = "生徒対談" if "生徒対談" in f"{summary} {event_type}" else "講師対談"
-        lines.append(f"【{talk_type}】")
-        lines.append("ゲスト")
+        talk_text = f"{summary} {event_type}"
+        if "生徒対談" in talk_text:
+            lines.extend(["【生徒対談】", "ゲスト"])
+        elif "講師対談" in talk_text:
+            lines.extend(["【講師対談】", "ゲスト"])
+        else:
+            # マネタイズ対談など、新しい対談名は予定名を勝手に講師対談へ変換しない。
+            lines.extend(_wrap_chars(summary, max_chars, 3))
     elif category in ("成果報告", "週報提出"):
         if "成果報告" in summary and "週報" in summary:
             lines.extend(["成果報告・", "週報提出"])
@@ -215,6 +220,80 @@ def _event_text_lines(event: Dict[str, Any], max_chars: int = 9) -> List[str]:
 def event_display_text(event: Dict[str, Any]) -> str:
     """プレビュー編集欄へ表示する初期テキストを返す。"""
     return "\n".join(_event_text_lines(event, max_chars=7))
+
+
+def _visible_event_layout(day_events: List[Dict[str, Any]], card_top: int, card_bottom_limit: int):
+    """1日分の表示予定と縦方向のカード範囲を返す。描画とクリック判定で共用する。"""
+    visible_events = day_events[:3]
+    available_height = card_bottom_limit - card_top
+    submission_events = [
+        event for event in day_events if classify_event(event) in ("成果報告", "週報提出")
+    ]
+    regular_events = [
+        event for event in day_events if classify_event(event) not in ("成果報告", "週報提出")
+    ]
+    if len(submission_events) >= 2 and regular_events:
+        visible_events = submission_events[:2] + regular_events[:1]
+        banner_height = max(34, int(available_height / 6))
+        first_bottom = card_top + banner_height
+        second_top = first_bottom + 5
+        second_bottom = second_top + banner_height
+        card_boxes = [
+            (card_top, first_bottom),
+            (second_top, second_bottom),
+            (second_bottom + 5, card_bottom_limit),
+        ]
+    elif len(submission_events) == 1 and regular_events and len(day_events) == 2:
+        visible_events = submission_events[:1] + regular_events[:1]
+        banner_height = max(46, int(available_height * 0.25))
+        card_boxes = [
+            (card_top, card_top + banner_height),
+            (card_top + banner_height + 5, card_bottom_limit),
+        ]
+    else:
+        card_space = max(58, available_height // max(1, len(visible_events)))
+        card_boxes = []
+        for idx in range(len(visible_events)):
+            cy = card_top + idx * card_space
+            card_boxes.append((cy, min(card_bottom_limit, cy + card_space - 5)))
+    return visible_events, card_boxes
+
+
+def calendar_event_key_at_point(
+    events: List[Dict[str, Any]], year: int, month: int, x: float, y: float
+) -> str:
+    """1080×1920のカレンダー座標から、クリックされた予定キーを返す。"""
+    width, height = 1080, 1920
+    margin, gap = 14, 6
+    header_h, weekday_h = 260, 78
+    grid_top = header_h + weekday_h
+    cell_w = (width - margin * 2 - gap * 6) // 7
+    weeks = calendar.Calendar(firstweekday=6).monthdayscalendar(year, month)
+    cell_h = (height - grid_top - margin - gap * (len(weeks) - 1)) // len(weeks)
+
+    by_day: Dict[int, List[Dict[str, Any]]] = {}
+    for event in events:
+        day = _event_day(event)
+        if day:
+            by_day.setdefault(day, []).append(event)
+    for day_events in by_day.values():
+        day_events.sort(key=lambda event: str(event.get("time", "")))
+
+    for row, week in enumerate(weeks):
+        for col, day in enumerate(week):
+            if not day:
+                continue
+            x0 = margin + col * (cell_w + gap)
+            y0 = grid_top + row * (cell_h + gap)
+            if not (x0 <= x <= x0 + cell_w and y0 <= y <= y0 + cell_h):
+                continue
+            day_events = by_day.get(day, [])
+            visible_events, card_boxes = _visible_event_layout(day_events, y0 + 54, y0 + cell_h - 8)
+            for event, (card_top, card_bottom) in zip(visible_events, card_boxes):
+                if card_top <= y <= card_bottom:
+                    return str(event.get("_calendar_image_key", "") or "")
+            return ""
+    return ""
 
 
 def _wrap_chars(text: str, max_chars: int, max_lines: int) -> List[str]:
@@ -456,48 +535,16 @@ def generate_calendar_image(
             draw.text((x0 + cell_w // 2, y0 + 28), str(day), anchor="mm", font=_rounded_font(42), fill=day_color)
 
             card_top = y0 + 54
-            visible_events = day_events[:3]
             card_bottom_limit = y1 - 8
-            available_height = card_bottom_limit - card_top
-            card_boxes = []
-            submission_events = [
-                event for event in day_events
-                if classify_event(event) in ("成果報告", "週報提出")
-            ]
-            regular_events = [
-                event for event in day_events
-                if classify_event(event) not in ("成果報告", "週報提出")
-            ]
-            # 週報提出＋成果報告＋通常予定の日は、各提出案内を1/6、通常予定を残りにする。
-            if len(submission_events) >= 2 and regular_events:
-                visible_events = submission_events[:2] + regular_events[:1]
-                banner_height = max(34, int(available_height / 6))
-                first_bottom = card_top + banner_height
-                second_top = first_bottom + 5
-                second_bottom = second_top + banner_height
-                card_boxes = [
-                    (card_top, first_bottom),
-                    (second_top, second_bottom),
-                    (second_bottom + 5, card_bottom_limit),
-                ]
-            # 提出案内が1件＋通常予定の日は、提出案内を上部1/4の帯にする。
-            elif len(submission_events) == 1 and regular_events and len(day_events) == 2:
-                visible_events = submission_events[:1] + regular_events[:1]
-                banner_height = max(46, int(available_height * 0.25))
-                card_boxes = [
-                    (card_top, card_top + banner_height),
-                    (card_top + banner_height + 5, card_bottom_limit),
-                ]
-            else:
-                card_space = max(58, available_height // max(1, len(visible_events)))
-                for idx in range(len(visible_events)):
-                    cy = card_top + idx * card_space
-                    card_boxes.append((cy, min(card_bottom_limit, cy + card_space - 5)))
+            visible_events, card_boxes = _visible_event_layout(day_events, card_top, card_bottom_limit)
 
             for idx, event in enumerate(visible_events):
                 cy, card_bottom = card_boxes[idx]
                 category = classify_event(event)
-                draw.rounded_rectangle((x0 + 7, cy, x1 - 7, card_bottom), radius=13, fill=colors[category], outline="#FFFFFF", width=2)
+                event_color = colors[category]
+                if category == "その他" and event.get("_calendar_background_color"):
+                    event_color = str(event["_calendar_background_color"])
+                draw.rounded_rectangle((x0 + 7, cy, x1 - 7, card_bottom), radius=13, fill=event_color, outline="#FFFFFF", width=2)
                 title_lines = _event_text_lines(event, max_chars=7)
                 compact_card = len(day_events) > 1 and card_bottom - cy < 180
                 if compact_card:
