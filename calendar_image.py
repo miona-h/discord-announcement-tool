@@ -9,6 +9,7 @@ import io
 import os
 import re
 import urllib.request
+from collections import deque
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
@@ -88,6 +89,13 @@ def _font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
 
 
 def _rounded_font(size: int) -> ImageFont.FreeTypeFont:
+    if os.path.exists(NOTO_SANS_JP_FONT):
+        font = ImageFont.truetype(NOTO_SANS_JP_FONT, size=size)
+        try:
+            font.set_variation_by_axes([800])
+        except (AttributeError, OSError):
+            pass
+        return font
     candidates = [
         "/System/Library/Fonts/ヒラギノ丸ゴ ProN W4.ttc",
         "/System/Library/Fonts/ヒラギノ丸ゴ Pro W4.ttc",
@@ -209,11 +217,42 @@ def _wrap_chars(text: str, max_chars: int, max_lines: int) -> List[str]:
     return lines
 
 
+def _remove_dark_edge_background(source: Image.Image) -> Image.Image:
+    """黒背景が画像端につながっている場合だけ、その背景を透過する。"""
+    image = source.convert("RGBA")
+    pixels = image.load()
+    width, height = image.size
+    if width < 2 or height < 2:
+        return image
+
+    corners = [pixels[0, 0], pixels[width - 1, 0], pixels[0, height - 1], pixels[width - 1, height - 1]]
+    if sum(1 for r, g, b, a in corners if a and max(r, g, b) < 80) < 2:
+        return image
+
+    queue = deque()
+    for x in range(width):
+        queue.extend(((x, 0), (x, height - 1)))
+    for y in range(height):
+        queue.extend(((0, y), (width - 1, y)))
+    visited = set()
+    while queue:
+        x, y = queue.popleft()
+        if (x, y) in visited or not (0 <= x < width and 0 <= y < height):
+            continue
+        visited.add((x, y))
+        r, g, b, a = pixels[x, y]
+        if not a or max(r, g, b) >= 90:
+            continue
+        pixels[x, y] = (r, g, b, 0)
+        queue.extend(((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)))
+    return image
+
+
 def _read_image(data: Optional[bytes]) -> Optional[Image.Image]:
     if not data:
         return None
     try:
-        return Image.open(io.BytesIO(data)).convert("RGBA")
+        return _remove_dark_edge_background(Image.open(io.BytesIO(data)))
     except Exception:
         return None
 
@@ -379,7 +418,7 @@ def generate_calendar_image(
         fill = "#FF6B78" if col == 0 else "#2F91ED" if col == 6 else "#FFFFFF"
         fg = "#FFFFFF" if col in (0, 6) else "#075FB9"
         draw.rounded_rectangle((x0, header_h, x0 + cell_w, header_h + 62), radius=22, fill=fill, outline="#74B9F3", width=2)
-        draw.text((x0 + cell_w // 2, header_h + 32), label, anchor="mm", font=_rounded_font(25), fill=fg, stroke_width=1, stroke_fill=fg)
+        draw.text((x0 + cell_w // 2, header_h + 32), label, anchor="mm", font=_rounded_font(31), fill=fg)
 
     by_day: Dict[int, List[Dict[str, Any]]] = {}
     for event in events:
@@ -403,7 +442,7 @@ def generate_calendar_image(
             draw.rounded_rectangle((x0, y0, x1, y1), radius=20, fill=colors[base_category], outline="#C5DDF2", width=2)
             is_holiday = _is_japanese_holiday(year, month, day)
             day_color = "#E92E3C" if col == 0 or is_holiday else "#07518D" if col == 6 else "#111827"
-            draw.text((x0 + cell_w // 2, y0 + 25), str(day), anchor="mm", font=_rounded_font(33), fill=day_color, stroke_width=1, stroke_fill=day_color)
+            draw.text((x0 + cell_w // 2, y0 + 28), str(day), anchor="mm", font=_rounded_font(42), fill=day_color)
 
             card_top = y0 + 54
             visible_events = day_events[:3]

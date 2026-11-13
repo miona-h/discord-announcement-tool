@@ -629,6 +629,8 @@ if GOOGLE_API_AVAILABLE:
                 st.session_state.pop("template_sheet_auto_error", None)
                 if "calendar_events" in st.session_state:
                     del st.session_state["calendar_events"]
+                if "calendar_image_events" in st.session_state:
+                    del st.session_state["calendar_image_events"]
                 if "calendar_list" in st.session_state:
                     del st.session_state["calendar_list"]
                 st.rerun()
@@ -673,17 +675,22 @@ if GOOGLE_API_AVAILABLE:
                             start_date=fetch_start,
                         )
                         event_data_list = []
+                        calendar_image_event_list = []
                         for ev in events:
                             summary = (ev.get("summary") or "").strip()
                             if not summary:
                                 continue
-                            if any(exc in summary for exc in CALENDAR_EXCLUDE_TITLES):
-                                continue
                             ed = api_event_to_event_data(ev, parse_event_name)
                             ed["_id"] = ev.get("id", "")
                             ed = _apply_template_keyword_match(ed)
+                            # カレンダー画像には週報提出を含む全予定を保持する。
+                            calendar_image_event_list.append(ed)
+                            # 告知文・月全体案内では従来どおり除外設定を適用する。
+                            if any(exc in summary for exc in CALENDAR_EXCLUDE_TITLES):
+                                continue
                             event_data_list.append(ed)
                         st.session_state["calendar_events"] = event_data_list
+                        st.session_state["calendar_image_events"] = calendar_image_event_list
                     except Exception as e:
                         st.error(f"予定の取得に失敗しました: {e}")
 
@@ -850,7 +857,9 @@ if GOOGLE_API_AVAILABLE:
             "背景色とイラストは生成するたびに変更できます。"
         )
 
-        calendar_events = st.session_state.get("calendar_events", [])
+        calendar_events = st.session_state.get(
+            "calendar_image_events", st.session_state.get("calendar_events", [])
+        )
         if not calendar_events:
             st.info("予定がまだありません。Googleカレンダータブで「📅 予定を取得」を押してください。")
         else:
@@ -935,6 +944,10 @@ if GOOGLE_API_AVAILABLE:
                 "Instagramリンクから講師アイコンの自動取得を試す",
                 value=True,
                 help="Instagram側の制限により取得できない場合は、カテゴリ別イラストへ自動で切り替わります。",
+            )
+            st.caption(
+                "講師画像を取得するには、Googleカレンダー予定の説明欄へ講師のInstagramプロフィールURLを"
+                "単独の行で入力し、予定を再取得してください。上の一覧の「Instagram」列にURLが表示されれば取得対象です。"
             )
 
             if st.button("🎨 カレンダー画像を生成", type="primary", disabled=not month_events):
