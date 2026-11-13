@@ -26,6 +26,7 @@ from monthly_overview import build_monthly_overview
 from calendar_image import (
     DEFAULT_CATEGORY_STYLES,
     classify_event,
+    event_display_text,
     fetch_instagram_profile_image,
     generate_calendar_image,
 )
@@ -883,15 +884,46 @@ if GOOGLE_API_AVAILABLE:
                     continue
 
             st.write(f"**対象予定：{len(month_events)}件**")
+            render_month_events = []
             if month_events:
+                edit_options = list(range(len(month_events)))
+                edit_index = st.selectbox(
+                    "表示テキストを編集する予定",
+                    edit_options,
+                    format_func=lambda i: (
+                        f"{month_events[i].get('date', '')} {month_events[i].get('time', '')}｜"
+                        f"{month_events[i].get('_raw_summary', '') or month_events[i].get('event_name', '')}"
+                    ),
+                    key=f"calendar_text_edit_target_{int(image_year)}_{int(image_month)}",
+                )
+                selected_event = month_events[edit_index]
+                selected_event_id = selected_event.get("_id") or f"row_{edit_index}"
+                selected_text_key = (
+                    f"calendar_display_text_{int(image_year)}_{int(image_month)}_{selected_event_id}"
+                )
+                st.text_area(
+                    "カレンダーに表示する文字（改行も反映されます）",
+                    value=event_display_text(selected_event),
+                    height=150,
+                    key=selected_text_key,
+                )
+                st.caption("予定を切り替えて編集してください。入力内容は画像生成時に反映されます。")
+
                 preview_rows = []
-                for event in month_events:
+                for event_index, event in enumerate(month_events):
+                    event_copy = event.copy()
+                    event_id = event.get("_id") or f"row_{event_index}"
+                    text_key = f"calendar_display_text_{int(image_year)}_{int(image_month)}_{event_id}"
+                    event_copy["_calendar_display_text"] = st.session_state.get(
+                        text_key, event_display_text(event)
+                    )
+                    render_month_events.append(event_copy)
                     preview_rows.append({
-                        "日付": event.get("date", ""),
-                        "時間": event.get("time", ""),
-                        "カテゴリ": classify_event(event),
-                        "予定名": event.get("_raw_summary", "") or event.get("event_name", ""),
-                        "Instagram": event.get("instagram_url", ""),
+                        "日付": event_copy.get("date", ""),
+                        "時間": event_copy.get("time", ""),
+                        "カテゴリ": classify_event(event_copy),
+                        "カレンダー表示テキスト": event_copy.get("_calendar_display_text", ""),
+                        "Instagram": event_copy.get("instagram_url", ""),
                     })
                 st.dataframe(preview_rows, use_container_width=True, height=260)
 
@@ -956,7 +988,7 @@ if GOOGLE_API_AVAILABLE:
                 if use_instagram:
                     instagram_urls = sorted({
                         str(event.get("instagram_url", "") or "").strip()
-                        for event in month_events if event.get("instagram_url")
+                        for event in render_month_events if event.get("instagram_url")
                     })
                     with st.spinner(f"Instagram画像を取得中…（0/{len(instagram_urls)}）"):
                         for instagram_url in instagram_urls:
@@ -967,7 +999,7 @@ if GOOGLE_API_AVAILABLE:
                                 failed_instagram += 1
                 try:
                     png_data = generate_calendar_image(
-                        month_events,
+                        render_month_events,
                         int(image_year),
                         int(image_month),
                         category_colors=category_colors,

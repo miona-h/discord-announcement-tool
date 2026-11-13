@@ -165,6 +165,10 @@ def _display_title(event: Dict[str, Any]) -> str:
 
 def _event_text_lines(event: Dict[str, Any], max_chars: int = 9) -> List[str]:
     """元画像に近い「種別 → ジャンル → 講師名」の順で表示文言を作る。"""
+    override = event.get("_calendar_display_text")
+    if override is not None and str(override).strip():
+        # プレビュー画面で入力した改行をそのまま採用する。
+        return [line.strip() for line in str(override).splitlines() if line.strip()][:6]
     category = classify_event(event)
     summary = _display_title(event)
     event_type = str(event.get("event_type", "") or "")
@@ -206,6 +210,11 @@ def _event_text_lines(event: Dict[str, Any], max_chars: int = 9) -> List[str]:
     if teacher and teacher not in " ".join(lines):
         lines.extend(_wrap_chars(teacher, max_chars, 2))
     return lines[:6]
+
+
+def event_display_text(event: Dict[str, Any]) -> str:
+    """プレビュー編集欄へ表示する初期テキストを返す。"""
+    return "\n".join(_event_text_lines(event, max_chars=7))
 
 
 def _wrap_chars(text: str, max_chars: int, max_lines: int) -> List[str]:
@@ -471,26 +480,36 @@ def generate_calendar_image(
                 category = classify_event(event)
                 draw.rounded_rectangle((x0 + 7, cy, x1 - 7, card_bottom), radius=13, fill=colors[category], outline="#FFFFFF", width=2)
                 title_lines = _event_text_lines(event, max_chars=7)
-                if len(day_events) > 1:
-                    title_lines = title_lines[:3]
+                compact_card = len(day_events) > 1 and card_bottom - cy < 180
+                if compact_card:
+                    title_lines = title_lines[:2]
                 card_height = card_bottom - cy
+                if not compact_card:
+                    title_lines = title_lines[:3 if card_height < 210 else 5]
                 if category in ("成果報告", "週報提出") and card_height < 90:
                     text_y = cy + max(4, (card_height - len(title_lines) * 21) // 2)
                 else:
                     text_y = cy + 8
+                title_font = _event_font(14 if compact_card else 17)
+                title_step = 18 if compact_card else 21
                 for line in title_lines:
                     draw.text(
                         (x0 + cell_w // 2, text_y), line, anchor="ma",
-                        font=_event_font(17), fill="#101A2E",
+                        font=title_font, fill="#101A2E",
                     )
-                    text_y += 21
+                    text_y += title_step
                 time_text = str(event.get("time", "") or "")
+                if category in ("成果報告", "週報提出") and card_height < 105:
+                    time_text = ""
                 if time_text and time_text != "00:00":
-                    has_icon_space = card_bottom - cy >= 150
-                    time_y = card_bottom - (100 if has_icon_space else 20)
+                    has_icon_space = card_bottom - cy >= (105 if compact_card else 150)
+                    if compact_card and has_icon_space:
+                        time_y = card_bottom - 58
+                    else:
+                        time_y = card_bottom - (100 if has_icon_space else 20)
                     draw.text(
                         (x0 + cell_w // 2, time_y), time_text, anchor="mm",
-                        font=_event_font(19), fill="#101A2E",
+                        font=_event_font(16 if compact_card else 19), fill="#101A2E",
                     )
 
                 source = None
@@ -499,8 +518,9 @@ def generate_calendar_image(
                     source = _read_image(profile_images.get(instagram_url))
                 if source is None:
                     source = _read_image(illustrations.get(category))
-                if card_bottom - cy >= 150:
-                    icon_size = min(70, card_bottom - cy - 12)
+                minimum_icon_height = 105 if compact_card else 150
+                if card_bottom - cy >= minimum_icon_height:
+                    icon_size = 38 if compact_card else min(70, card_bottom - cy - 12)
                     icon_x = x0 + (cell_w - icon_size) // 2
                     icon_y = card_bottom - icon_size - 6
                     if category in ("オフ会", "オン会"):
