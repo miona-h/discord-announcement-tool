@@ -370,12 +370,14 @@ def generate_calendar_image(
     category_colors: Optional[Dict[str, str]] = None,
     category_illustrations: Optional[Dict[str, bytes]] = None,
     instagram_images: Optional[Dict[str, bytes]] = None,
+    event_images: Optional[Dict[str, bytes]] = None,
 ) -> bytes:
     """縦16:9（1080×1920px）のPNGカレンダーを返す。"""
     colors = dict(DEFAULT_CATEGORY_STYLES)
     colors.update(category_colors or {})
     illustrations = category_illustrations or {}
     profile_images = instagram_images or {}
+    individual_images = event_images or {}
 
     width, height = 1080, 1920
     margin, gap = 14, 6
@@ -458,12 +460,29 @@ def generate_calendar_image(
             card_bottom_limit = y1 - 8
             available_height = card_bottom_limit - card_top
             card_boxes = []
-            # 成果報告・週報提出＋通常予定の日は、提出案内を上部1/4の帯にする。
-            if (
-                len(visible_events) == 2
-                and classify_event(visible_events[0]) in ("成果報告", "週報提出")
-                and classify_event(visible_events[1]) not in ("成果報告", "週報提出")
-            ):
+            submission_events = [
+                event for event in day_events
+                if classify_event(event) in ("成果報告", "週報提出")
+            ]
+            regular_events = [
+                event for event in day_events
+                if classify_event(event) not in ("成果報告", "週報提出")
+            ]
+            # 週報提出＋成果報告＋通常予定の日は、各提出案内を1/6、通常予定を残りにする。
+            if len(submission_events) >= 2 and regular_events:
+                visible_events = submission_events[:2] + regular_events[:1]
+                banner_height = max(34, int(available_height / 6))
+                first_bottom = card_top + banner_height
+                second_top = first_bottom + 5
+                second_bottom = second_top + banner_height
+                card_boxes = [
+                    (card_top, first_bottom),
+                    (second_top, second_bottom),
+                    (second_bottom + 5, card_bottom_limit),
+                ]
+            # 提出案内が1件＋通常予定の日は、提出案内を上部1/4の帯にする。
+            elif len(submission_events) == 1 and regular_events and len(day_events) == 2:
+                visible_events = submission_events[:1] + regular_events[:1]
                 banner_height = max(46, int(available_height * 0.25))
                 card_boxes = [
                     (card_top, card_top + banner_height),
@@ -512,9 +531,11 @@ def generate_calendar_image(
                         font=_event_font(16 if compact_card else 19), fill="#101A2E",
                     )
 
-                source = None
+                # 編集画面で予定ごとに登録した画像を最優先で使用する。
+                event_image_key = str(event.get("_calendar_image_key", "") or "")
+                source = _read_image(individual_images.get(event_image_key))
                 instagram_url = str(event.get("instagram_url", "") or "")
-                if instagram_url:
+                if source is None and instagram_url:
                     source = _read_image(profile_images.get(instagram_url))
                 if source is None:
                     source = _read_image(illustrations.get(category))

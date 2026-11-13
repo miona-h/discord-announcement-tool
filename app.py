@@ -885,10 +885,22 @@ if GOOGLE_API_AVAILABLE:
 
             st.write(f"**対象予定：{len(month_events)}件**")
             render_month_events = []
+            event_images = {}
             if month_events:
+                def calendar_event_key(event, event_index):
+                    raw_key = str(event.get("_id") or (
+                        f"{event.get('date', '')}|{event.get('time', '')}|"
+                        f"{event.get('_raw_summary', '') or event.get('event_name', '')}|{event_index}"
+                    ))
+                    return hashlib.sha1(raw_key.encode("utf-8")).hexdigest()[:16]
+
+                st.markdown("### 🖼️ 画像プレビュー編集")
+                st.caption(
+                    "予定を選択し、画像に表示する改行・文字と講師画像（またはイベント画像）を設定できます。"
+                )
                 edit_options = list(range(len(month_events)))
                 edit_index = st.selectbox(
-                    "表示テキストを編集する予定",
+                    "編集する予定",
                     edit_options,
                     format_func=lambda i: (
                         f"{month_events[i].get('date', '')} {month_events[i].get('time', '')}｜"
@@ -897,26 +909,53 @@ if GOOGLE_API_AVAILABLE:
                     key=f"calendar_text_edit_target_{int(image_year)}_{int(image_month)}",
                 )
                 selected_event = month_events[edit_index]
-                selected_event_id = selected_event.get("_id") or f"row_{edit_index}"
+                selected_event_id = calendar_event_key(selected_event, edit_index)
                 selected_text_key = (
                     f"calendar_display_text_{int(image_year)}_{int(image_month)}_{selected_event_id}"
                 )
-                st.text_area(
-                    "カレンダーに表示する文字（改行も反映されます）",
-                    value=event_display_text(selected_event),
-                    height=150,
-                    key=selected_text_key,
+                selected_image_key = (
+                    f"calendar_event_image_{int(image_year)}_{int(image_month)}_{selected_event_id}"
                 )
-                st.caption("予定を切り替えて編集してください。入力内容は画像生成時に反映されます。")
+                text_column, image_column = st.columns([3, 2])
+                with text_column:
+                    st.text_area(
+                        "画像に表示する文字（改行も反映）",
+                        value=event_display_text(selected_event),
+                        height=180,
+                        key=selected_text_key,
+                    )
+                with image_column:
+                    uploaded_event_image = st.file_uploader(
+                        "講師・イベント画像",
+                        type=["png", "jpg", "jpeg", "webp"],
+                        key=f"{selected_image_key}_uploader",
+                        help="未設定の講師画像をここから予定ごとに追加できます。",
+                    )
+                    if uploaded_event_image is not None:
+                        st.session_state[selected_image_key] = uploaded_event_image.getvalue()
+                    selected_image_data = st.session_state.get(selected_image_key)
+                    if selected_image_data:
+                        st.image(selected_image_data, caption="この予定に使用する画像", width=150)
+                        if st.button("この画像を削除", key=f"{selected_image_key}_delete"):
+                            st.session_state.pop(selected_image_key, None)
+                            st.session_state.pop(f"{selected_image_key}_uploader", None)
+                            st.rerun()
+                    else:
+                        st.caption("画像未設定（Instagram画像またはカテゴリ画像を使用）")
+                st.caption("予定を切り替えて編集してください。入力内容と画像は生成時に反映されます。")
 
                 preview_rows = []
                 for event_index, event in enumerate(month_events):
                     event_copy = event.copy()
-                    event_id = event.get("_id") or f"row_{event_index}"
+                    event_id = calendar_event_key(event, event_index)
                     text_key = f"calendar_display_text_{int(image_year)}_{int(image_month)}_{event_id}"
+                    image_key = f"calendar_event_image_{int(image_year)}_{int(image_month)}_{event_id}"
                     event_copy["_calendar_display_text"] = st.session_state.get(
                         text_key, event_display_text(event)
                     )
+                    event_copy["_calendar_image_key"] = event_id
+                    if st.session_state.get(image_key):
+                        event_images[event_id] = st.session_state[image_key]
                     render_month_events.append(event_copy)
                     preview_rows.append({
                         "日付": event_copy.get("date", ""),
@@ -1005,6 +1044,7 @@ if GOOGLE_API_AVAILABLE:
                         category_colors=category_colors,
                         category_illustrations=category_illustrations,
                         instagram_images=instagram_images,
+                        event_images=event_images,
                     )
                     st.session_state["calendar_image_png"] = png_data
                     st.session_state["calendar_image_name"] = f"{int(image_year)}年{int(image_month)}月_わくわく予定カレンダー.png"
