@@ -10,6 +10,7 @@ import streamlit as st
 import sys
 import os
 import csv
+import hashlib
 import io
 import re
 import urllib.request
@@ -22,6 +23,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from parse_calendar import parse_event_name
 from generate_announcement import AnnouncementGenerator
 from monthly_overview import build_monthly_overview
+from calendar_image import (
+    DEFAULT_CATEGORY_STYLES,
+    classify_event,
+    fetch_instagram_profile_image,
+    generate_calendar_image,
+)
 from config import CALENDAR_EXCLUDE_TITLES
 from google.oauth2.credentials import Credentials
 
@@ -32,6 +39,7 @@ TEMPLATE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1d2BkB9xIQZnFVdiV7B
 TEMPLATE_SHEET_ID = "1d2BkB9xIQZnFVdiV7Bk-x3S2yA7XAmAgUPa79iLJrTo"
 TEMPLATE_SHEET_GID = "0"
 TEMPLATE_SHEET_RANGE = "テンプレート!A:E"
+CALENDAR_ASSET_DIR = os.path.join(APP_DIR, "calendar_assets")
 
 try:
     from streamlit_oauth import OAuth2Component
@@ -77,6 +85,54 @@ GOOGLE_SCOPE_LIST = [
     "https://www.googleapis.com/auth/spreadsheets.readonly",
 ]
 GOOGLE_SCOPE_STR = " ".join(GOOGLE_SCOPE_LIST)
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def _cached_instagram_profile_image(instagram_url: str):
+    """Instagram画像を1日キャッシュし、画像生成時の待ち時間を抑える。"""
+    return fetch_instagram_profile_image(instagram_url)
+
+
+def _save_calendar_asset(category: str, uploaded_file) -> str:
+    """アップロード画像を再利用用の履歴に保存する。"""
+    data = uploaded_file.getvalue()
+    if not data:
+        return ""
+    os.makedirs(CALENDAR_ASSET_DIR, exist_ok=True)
+    original = os.path.basename(uploaded_file.name or "image.png")
+    safe_name = re.sub(r"[^0-9A-Za-zぁ-んァ-ン一-鿿._-]+", "_", original)
+    digest = hashlib.sha256(data).hexdigest()[:12]
+    filename = f"{category}__{digest}__{safe_name}"
+    path = os.path.join(CALENDAR_ASSET_DIR, filename)
+    if not os.path.exists(path):
+        with open(path, "wb") as f:
+            f.write(data)
+    return path
+
+
+def _list_calendar_assets(category: str) -> list[tuple[str, str]]:
+    if not os.path.isdir(CALENDAR_ASSET_DIR):
+        return []
+    prefix = f"{category}__"
+    assets = []
+    for filename in sorted(os.listdir(CALENDAR_ASSET_DIR), reverse=True):
+        if not filename.startswith(prefix):
+            continue
+        path = os.path.join(CALENDAR_ASSET_DIR, filename)
+        if not os.path.isfile(path):
+            continue
+        parts = filename.split("__", 2)
+        label = parts[2] if len(parts) == 3 else filename
+        assets.append((label, path))
+    return assets
+
+
+def _read_saved_asset(path: str) -> bytes:
+    try:
+        with open(path, "rb") as f:
+            return f.read()
+    except OSError:
+        return b""
 
 
 def _use_streamlit_oauth() -> bool:
@@ -470,7 +526,7 @@ if GOOGLE_API_AVAILABLE and st.session_state.get("google_credentials"):
             # カレンダー等の利用は止めず、テンプレート管理タブで再試行できるようにする。
             st.session_state["template_sheet_auto_error"] = str(e)
 
-tab_names = ["🔗 Googleカレンダーと連携", "✏️ 手動入力", "📝 テンプレート管理"]
+tab_names = ["🔗 Googleカレンダーと連携", "🖼️ カレンダー画像", "✏️ 手動入力", "📝 テンプレート管理"]
 if not GOOGLE_API_AVAILABLE:
     tab_names = ["✏️ 手動入力", "📝 テンプレート管理"]
 
@@ -785,6 +841,145 @@ if GOOGLE_API_AVAILABLE:
                         st.caption("💡 その他ジャンル→オン会→特別講義→講師対談→生徒対談→ジャンル特化グルコン（ジャンルごと・日付順）")
                     except Exception as e:
                         st.error(f"エラー: {e}")
+    tab_idx += 1
+
+    with tabs[tab_idx]:
+        st.markdown("**🖼️ 1ヶ月分の予定からカレンダー画像を作成**")
+        st.caption(
+            "先に「Googleカレンダーと連携」タブで予定を取得してください。"
+            "背景色とイラストは生成するたびに変更できます。"
+        )
+
+        calendar_events = st.session_state.get("calendar_events", [])
+        if not calendar_events:
+            st.info("予定がまだありません。Googleカレンダータブで「📅 予定を取得」を押してください。")
+        else:
+            first_date = str(calendar_events[0].get("date", "") or "")
+            try:
+                default_month = int(first_date.split("/")[0])
+            except (ValueError, IndexError):
+                default_month = datetime.now().month
+            year_col, month_col = st.columns(2)
+            with year_col:
+                image_year = st.number_input("年", min_value=2020, max_value=2100, value=datetime.now().year, step=1)
+            with month_col:
+                image_month = st.number_input("月", min_value=1, max_value=12, value=default_month, step=1)
+
+            month_events = []
+            for event in calendar_events:
+                try:
+                    if int(str(event.get("date", "")).split("/")[0]) == int(image_month):
+                        month_events.append(event)
+                except (ValueError, IndexError):
+                    continue
+
+            st.write(f"**対象予定：{len(month_events)}件**")
+            if month_events:
+                preview_rows = []
+                for event in month_events:
+                    preview_rows.append({
+                        "日付": event.get("date", ""),
+                        "時間": event.get("time", ""),
+                        "カテゴリ": classify_event(event),
+                        "予定名": event.get("_raw_summary", "") or event.get("event_name", ""),
+                        "Instagram": event.get("instagram_url", ""),
+                    })
+                st.dataframe(preview_rows, use_container_width=True, height=260)
+
+            st.markdown("**カテゴリ別の背景色**")
+            category_colors = {}
+            color_columns = st.columns(2)
+            for idx, (category, default_color) in enumerate(DEFAULT_CATEGORY_STYLES.items()):
+                with color_columns[idx % 2]:
+                    category_colors[category] = st.color_picker(
+                        category, default_color, key=f"calendar_color_{category}"
+                    )
+
+            category_illustrations = {}
+            with st.expander("🎨 カテゴリ別イラスト（任意）"):
+                st.caption(
+                    "PNG・JPGを追加すると履歴に保存され、次回から選択だけで再利用できます。"
+                    "カテゴリ画像は、講師画像が取得できない予定に使用します。"
+                )
+
+                asset_categories = list(DEFAULT_CATEGORY_STYLES)
+                for category in asset_categories:
+                    st.markdown(f"**{category}**")
+                    history = _list_calendar_assets(category)
+                    history_options = ["使用しない"] + [label for label, _ in history]
+                    selected_history = st.selectbox(
+                        f"{category}の履歴から選択",
+                        history_options,
+                        key=f"calendar_asset_history_{category}",
+                    )
+                    selected_data = None
+                    if selected_history != "使用しない":
+                        selected_index = history_options.index(selected_history) - 1
+                        selected_data = _read_saved_asset(history[selected_index][1])
+
+                    uploaded = st.file_uploader(
+                        f"{category}の新しいイラストを追加",
+                        type=["png", "jpg", "jpeg", "webp"],
+                        key=f"calendar_illustration_{category}",
+                    )
+                    if uploaded is not None:
+                        saved_path = _save_calendar_asset(category, uploaded)
+                        selected_data = uploaded.getvalue()
+                        if saved_path:
+                            st.caption(f"✅ 履歴に保存済み：{uploaded.name}")
+
+                    if selected_data:
+                        category_illustrations[category] = selected_data
+
+            use_instagram = st.checkbox(
+                "Instagramリンクから講師アイコンの自動取得を試す",
+                value=True,
+                help="Instagram側の制限により取得できない場合は、カテゴリ別イラストへ自動で切り替わります。",
+            )
+
+            if st.button("🎨 カレンダー画像を生成", type="primary", disabled=not month_events):
+                instagram_images = {}
+                failed_instagram = 0
+                if use_instagram:
+                    instagram_urls = sorted({
+                        str(event.get("instagram_url", "") or "").strip()
+                        for event in month_events if event.get("instagram_url")
+                    })
+                    with st.spinner(f"Instagram画像を取得中…（0/{len(instagram_urls)}）"):
+                        for instagram_url in instagram_urls:
+                            image_data = _cached_instagram_profile_image(instagram_url)
+                            if image_data:
+                                instagram_images[instagram_url] = image_data
+                            else:
+                                failed_instagram += 1
+                try:
+                    png_data = generate_calendar_image(
+                        month_events,
+                        int(image_year),
+                        int(image_month),
+                        category_colors=category_colors,
+                        category_illustrations=category_illustrations,
+                        instagram_images=instagram_images,
+                    )
+                    st.session_state["calendar_image_png"] = png_data
+                    st.session_state["calendar_image_name"] = f"{int(image_year)}年{int(image_month)}月_わくわく予定カレンダー.png"
+                    if failed_instagram:
+                        st.warning(
+                            f"Instagram画像は{failed_instagram}件取得できなかったため、"
+                            "登録したイラストまたは画像なしで生成しました。"
+                        )
+                    st.success("カレンダー画像を生成しました。")
+                except Exception as e:
+                    st.error(f"画像の生成に失敗しました: {e}")
+
+            if st.session_state.get("calendar_image_png"):
+                st.image(st.session_state["calendar_image_png"], use_container_width=True)
+                st.download_button(
+                    "📥 PNG画像をダウンロード",
+                    data=st.session_state["calendar_image_png"],
+                    file_name=st.session_state.get("calendar_image_name", "calendar.png"),
+                    mime="image/png",
+                )
     tab_idx += 1
 
 with tabs[tab_idx]:
