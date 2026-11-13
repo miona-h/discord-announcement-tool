@@ -41,6 +41,8 @@ TEMPLATE_SHEET_ID = "1d2BkB9xIQZnFVdiV7Bk-x3S2yA7XAmAgUPa79iLJrTo"
 TEMPLATE_SHEET_GID = "0"
 TEMPLATE_SHEET_RANGE = "テンプレート!A:E"
 CALENDAR_ASSET_DIR = os.path.join(APP_DIR, "calendar_assets")
+CALENDAR_IMAGE_LIBRARY_DIR = os.path.join(CALENDAR_ASSET_DIR, "image_library")
+CALENDAR_IMAGE_LIBRARY_LIMIT = 300
 
 try:
     from streamlit_oauth import OAuth2Component
@@ -134,6 +136,54 @@ def _read_saved_asset(path: str) -> bytes:
             return f.read()
     except OSError:
         return b""
+
+
+def _list_image_library() -> list[tuple[str, str]]:
+    """共通画像ライブラリを最終使用日時の新しい順で返す。"""
+    if not os.path.isdir(CALENDAR_IMAGE_LIBRARY_DIR):
+        return []
+    assets = []
+    for filename in os.listdir(CALENDAR_IMAGE_LIBRARY_DIR):
+        path = os.path.join(CALENDAR_IMAGE_LIBRARY_DIR, filename)
+        if not os.path.isfile(path):
+            continue
+        parts = filename.split("__", 1)
+        label = parts[1] if len(parts) == 2 else filename
+        assets.append((label, path))
+    assets.sort(key=lambda item: os.path.getmtime(item[1]), reverse=True)
+    return assets[:CALENDAR_IMAGE_LIBRARY_LIMIT]
+
+
+def _save_image_library_asset(uploaded_file) -> tuple[str, str]:
+    """画像を共通ライブラリへ保存する。重複画像は再利用する。"""
+    data = uploaded_file.getvalue()
+    if not data:
+        return "", "画像データが空です。"
+    os.makedirs(CALENDAR_IMAGE_LIBRARY_DIR, exist_ok=True)
+    original = os.path.basename(uploaded_file.name or "image.png")
+    safe_name = re.sub(r"[^0-9A-Za-zぁ-んァ-ン一-鿿._-]+", "_", original)
+    digest = hashlib.sha256(data).hexdigest()[:16]
+    existing = next(
+        (path for _, path in _list_image_library() if os.path.basename(path).startswith(f"{digest}__")),
+        "",
+    )
+    if existing:
+        os.utime(existing, None)
+        return existing, ""
+    if len(_list_image_library()) >= CALENDAR_IMAGE_LIBRARY_LIMIT:
+        return "", f"画像ライブラリは最大{CALENDAR_IMAGE_LIBRARY_LIMIT}件です。不要な画像を削除してください。"
+    path = os.path.join(CALENDAR_IMAGE_LIBRARY_DIR, f"{digest}__{safe_name}")
+    with open(path, "wb") as f:
+        f.write(data)
+    return path, ""
+
+
+def _touch_image_library_asset(path: str) -> None:
+    try:
+        if path and os.path.isfile(path):
+            os.utime(path, None)
+    except OSError:
+        pass
 
 
 def _use_streamlit_oauth() -> bool:
@@ -886,6 +936,7 @@ if GOOGLE_API_AVAILABLE:
             st.write(f"**対象予定：{len(month_events)}件**")
             render_month_events = []
             event_images = {}
+            event_image_paths = []
             if month_events:
                 def calendar_event_key(event, event_index):
                     raw_key = str(event.get("_id") or (
@@ -898,23 +949,34 @@ if GOOGLE_API_AVAILABLE:
                 st.caption(
                     "予定を選択し、画像に表示する改行・文字と講師画像（またはイベント画像）を設定できます。"
                 )
-                edit_options = list(range(len(month_events)))
-                edit_index = st.selectbox(
-                    "編集する予定",
-                    edit_options,
-                    format_func=lambda i: (
-                        f"{month_events[i].get('date', '')} {month_events[i].get('time', '')}｜"
-                        f"{month_events[i].get('_raw_summary', '') or month_events[i].get('event_name', '')}"
-                    ),
-                    key=f"calendar_text_edit_target_{int(image_year)}_{int(image_month)}",
-                )
+                target_key = f"calendar_text_edit_target_{int(image_year)}_{int(image_month)}"
+                if target_key not in st.session_state or st.session_state[target_key] >= len(month_events):
+                    st.session_state[target_key] = 0
+                st.caption("編集したい予定をクリックしてください")
+                preview_columns = st.columns(4)
+                for event_index, event in enumerate(month_events):
+                    event_label = (
+                        f"{event.get('date', '')} {event.get('time', '')}\n"
+                        f"{event.get('_raw_summary', '') or event.get('event_name', '')}"
+                    )
+                    with preview_columns[event_index % 4]:
+                        if st.button(
+                            event_label,
+                            key=f"calendar_event_card_{int(image_year)}_{int(image_month)}_{event_index}",
+                            type="primary" if st.session_state[target_key] == event_index else "secondary",
+                            use_container_width=True,
+                        ):
+                            if st.session_state[target_key] != event_index:
+                                st.session_state[target_key] = event_index
+                                st.rerun()
+                edit_index = int(st.session_state[target_key])
                 selected_event = month_events[edit_index]
                 selected_event_id = calendar_event_key(selected_event, edit_index)
                 selected_text_key = (
                     f"calendar_display_text_{int(image_year)}_{int(image_month)}_{selected_event_id}"
                 )
-                selected_image_key = (
-                    f"calendar_event_image_{int(image_year)}_{int(image_month)}_{selected_event_id}"
+                selected_image_path_key = (
+                    f"calendar_event_library_path_{int(image_year)}_{int(image_month)}_{selected_event_id}"
                 )
                 text_column, image_column = st.columns([3, 2])
                 with text_column:
@@ -926,20 +988,37 @@ if GOOGLE_API_AVAILABLE:
                     )
                 with image_column:
                     uploaded_event_image = st.file_uploader(
-                        "講師・イベント画像",
+                        "ライブラリへ画像を追加",
                         type=["png", "jpg", "jpeg", "webp"],
-                        key=f"{selected_image_key}_uploader",
-                        help="未設定の講師画像をここから予定ごとに追加できます。",
+                        key=f"{selected_image_path_key}_uploader",
+                        help=f"全予定で共通利用できます。最大{CALENDAR_IMAGE_LIBRARY_LIMIT}件です。",
                     )
                     if uploaded_event_image is not None:
-                        st.session_state[selected_image_key] = uploaded_event_image.getvalue()
-                    selected_image_data = st.session_state.get(selected_image_key)
-                    if selected_image_data:
+                        saved_path, save_error = _save_image_library_asset(uploaded_event_image)
+                        if save_error:
+                            st.error(save_error)
+                        elif saved_path:
+                            st.session_state[selected_image_path_key] = saved_path
+                            st.session_state[f"{selected_image_path_key}_selector"] = saved_path
+
+                    library_assets = _list_image_library()
+                    library_paths = [None] + [path for _, path in library_assets]
+                    current_path = st.session_state.get(selected_image_path_key)
+                    default_index = library_paths.index(current_path) if current_path in library_paths else 0
+                    selected_library_path = st.selectbox(
+                        f"画像ライブラリ（{len(library_assets)}/{CALENDAR_IMAGE_LIBRARY_LIMIT}件）",
+                        library_paths,
+                        index=default_index,
+                        format_func=lambda path: "自動取得・カテゴリ画像を使用" if path is None else next(
+                            (label for label, asset_path in library_assets if asset_path == path),
+                            os.path.basename(path),
+                        ),
+                        key=f"{selected_image_path_key}_selector",
+                    )
+                    st.session_state[selected_image_path_key] = selected_library_path
+                    if selected_library_path:
+                        selected_image_data = _read_saved_asset(selected_library_path)
                         st.image(selected_image_data, caption="この予定に使用する画像", width=150)
-                        if st.button("この画像を削除", key=f"{selected_image_key}_delete"):
-                            st.session_state.pop(selected_image_key, None)
-                            st.session_state.pop(f"{selected_image_key}_uploader", None)
-                            st.rerun()
                     else:
                         st.caption("画像未設定（Instagram画像またはカテゴリ画像を使用）")
                 st.caption("予定を切り替えて編集してください。入力内容と画像は生成時に反映されます。")
@@ -949,13 +1028,17 @@ if GOOGLE_API_AVAILABLE:
                     event_copy = event.copy()
                     event_id = calendar_event_key(event, event_index)
                     text_key = f"calendar_display_text_{int(image_year)}_{int(image_month)}_{event_id}"
-                    image_key = f"calendar_event_image_{int(image_year)}_{int(image_month)}_{event_id}"
+                    image_path_key = f"calendar_event_library_path_{int(image_year)}_{int(image_month)}_{event_id}"
                     event_copy["_calendar_display_text"] = st.session_state.get(
                         text_key, event_display_text(event)
                     )
                     event_copy["_calendar_image_key"] = event_id
-                    if st.session_state.get(image_key):
-                        event_images[event_id] = st.session_state[image_key]
+                    selected_path = st.session_state.get(image_path_key)
+                    if selected_path:
+                        image_data = _read_saved_asset(selected_path)
+                        if image_data:
+                            event_images[event_id] = image_data
+                            event_image_paths.append(selected_path)
                     render_month_events.append(event_copy)
                     preview_rows.append({
                         "日付": event_copy.get("date", ""),
@@ -965,6 +1048,33 @@ if GOOGLE_API_AVAILABLE:
                         "Instagram": event_copy.get("instagram_url", ""),
                     })
                 st.dataframe(preview_rows, use_container_width=True, height=260)
+
+                with st.expander("🗂️ 画像ライブラリを管理"):
+                    st.caption("画像は最後に使用した順で表示されます。最大300件まで登録できます。")
+                    management_assets = _list_image_library()
+                    if not management_assets:
+                        st.info("ライブラリに画像はまだありません。")
+                    else:
+                        management_path = st.selectbox(
+                            "削除する画像を選択",
+                            [path for _, path in management_assets],
+                            format_func=lambda path: next(
+                                (label for label, asset_path in management_assets if asset_path == path),
+                                os.path.basename(path),
+                            ),
+                            key="calendar_library_delete_target",
+                        )
+                        st.image(_read_saved_asset(management_path), width=120)
+                        if st.button("ライブラリから削除", key="calendar_library_delete_button"):
+                            try:
+                                os.remove(management_path)
+                                for key, value in list(st.session_state.items()):
+                                    if key.startswith("calendar_event_library_path_") and value == management_path:
+                                        st.session_state[key] = None
+                                st.success("画像を削除しました。")
+                                st.rerun()
+                            except OSError as e:
+                                st.error(f"画像を削除できませんでした: {e}")
 
             st.markdown("**カテゴリ別の背景色**")
             category_colors = {}
@@ -1022,6 +1132,8 @@ if GOOGLE_API_AVAILABLE:
             )
 
             if st.button("🎨 カレンダー画像を生成", type="primary", disabled=not month_events):
+                for used_image_path in set(event_image_paths):
+                    _touch_image_library_asset(used_image_path)
                 instagram_images = {}
                 failed_instagram = 0
                 if use_instagram:
