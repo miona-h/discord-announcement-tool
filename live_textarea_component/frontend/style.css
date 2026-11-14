@@ -1,0 +1,21 @@
+:root {
+  font-family: var(--font, sans-serif);
+  color: var(--text, #31333f);
+  background: var(--background, #fff);
+}
+* { box-sizing: border-box; }
+body { margin: 0; padding: 0; background: transparent; }
+label { display: block; font-size: 14px; margin-bottom: 7px; }
+textarea {
+  display: block;
+  width: 100%;
+  resize: vertical;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--text, #31333f) 25%, transparent);
+  border-radius: 8px;
+  outline: none;
+  color: var(--text, #31333f);
+  background: var(--secondary, #f0f2f6);
+  font: 16px/1.5 var(--font, sans-serif);
+}
+textarea:focus { border: 2px solid var(--primary, #ff4b4b); padding: 9px 11px; }

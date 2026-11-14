@@ -39,7 +39,11 @@ from calendar_image import (
     generate_calendar_image,
 )
 from config import CALENDAR_EXCLUDE_TITLES
-from live_textarea_component import live_textarea
+try:
+    from live_textarea_component import live_textarea
+    LIVE_TEXTAREA_AVAILABLE = True
+except Exception:
+    LIVE_TEXTAREA_AVAILABLE = False
 from google.oauth2.credentials import Credentials
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -1440,20 +1444,27 @@ if GOOGLE_API_AVAILABLE:
                             st.session_state[draft_text_key] = st.session_state.get(
                                 saved_text_key, event_display_text(focused_event)
                             )
-                        live_text_value = live_textarea(
-                            "表示文字（改行も反映）",
-                            value=st.session_state[draft_text_key],
-                            height=220,
-                            debounce=300,
-                            key=f"live_calendar_text_{int(image_year)}_{int(image_month)}_{focused_id}",
-                        )
-                        if live_text_value != st.session_state[draft_text_key]:
-                            st.session_state[draft_text_key] = live_text_value
-                            st.rerun()
-                        st.caption(
-                            "入力から約0.3秒後に左のプレビューへ自動反映されます。"
-                            "確定する場合は保存してください。"
-                        )
+                        if LIVE_TEXTAREA_AVAILABLE:
+                            live_text_value = live_textarea(
+                                "表示文字（改行も反映）",
+                                value=st.session_state[draft_text_key],
+                                height=220,
+                                debounce=300,
+                                key=f"live_calendar_text_{int(image_year)}_{int(image_month)}_{focused_id}",
+                            )
+                            if live_text_value != st.session_state[draft_text_key]:
+                                st.session_state[draft_text_key] = live_text_value
+                                st.rerun()
+                            st.caption(
+                                "入力から約0.3秒後に左のプレビューへ自動反映されます。"
+                                "確定する場合は保存してください。"
+                            )
+                        else:
+                            st.text_area("表示文字（改行も反映）", height=220, key=draft_text_key)
+                            st.warning(
+                                "リアルタイム入力部品が未配置です。"
+                                "live_textarea_componentフォルダ一式をGitHubへ追加してください。"
+                            )
                         saved_font_key = f"calendar_saved_font_size_{int(image_year)}_{int(image_month)}_{focused_id}"
                         saved_lines_key = f"calendar_saved_max_lines_{int(image_year)}_{int(image_month)}_{focused_id}"
                         saved_weight_key = f"calendar_saved_height_weight_{int(image_year)}_{int(image_month)}_{focused_id}"
