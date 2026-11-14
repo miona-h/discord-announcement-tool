@@ -199,25 +199,25 @@ def _event_text_lines(event: Dict[str, Any], max_chars: int = 9) -> List[str]:
             lines.extend(["【講師対談】", "ゲスト"])
         else:
             # マネタイズ対談など、新しい対談名は予定名を勝手に講師対談へ変換しない。
-            lines.extend(_wrap_chars(summary, max_chars, 3))
+            lines.extend(_wrap_chars(summary, max_chars, 6))
     elif category in ("成果報告", "週報提出"):
         if "成果報告" in summary and "週報" in summary:
             lines.extend(["成果報告・", "週報提出"])
         else:
             lines.append(category)
     elif category == "オフ会":
-        lines.extend(_wrap_chars(summary, max_chars, 3))
+        lines.extend(_wrap_chars(summary, max_chars, 6))
     elif category == "オン会":
         if "万垢" in summary:
             lines.extend(_wrap_chars(summary, max_chars, 3))
         else:
             lines.extend(["オン会", "(in Zoom)"] if "zoom" in summary.lower() else ["オン会"])
     else:
-        lines.extend(_wrap_chars(summary, max_chars, 3))
+        lines.extend(_wrap_chars(summary, max_chars, 10))
 
     if teacher and teacher not in " ".join(lines):
-        lines.extend(_wrap_chars(teacher, max_chars, 2))
-    return lines[:6]
+        lines.extend(_wrap_chars(teacher, max_chars, 4))
+    return lines[:10]
 
 
 def event_display_text(event: Dict[str, Any]) -> str:
@@ -327,7 +327,6 @@ def _wrap_chars(text: str, max_chars: int, max_lines: int) -> List[str]:
     lines = [compact[i:i + max_chars] for i in range(0, len(compact), max_chars)] or [""]
     if len(lines) > max_lines:
         lines = lines[:max_lines]
-        lines[-1] = lines[-1][:-1] + "…"
     return lines
 
 
@@ -602,14 +601,10 @@ def generate_calendar_image(
                 elif compact_card:
                     if category in ("成果報告", "週報提出"):
                         title_lines = title_lines[:2]
-                    elif len(title_lines) > 3:
-                        # 狭いカードでも、種別と講師名（末尾）を必ず残す。
-                        title_lines = title_lines[:2] + title_lines[-1:]
                     else:
-                        title_lines = title_lines[:3]
+                        # 省略記号や講師名の欠落を避け、最大6行まで全文を表示する。
+                        title_lines = title_lines[:6]
                 card_height = card_bottom - cy
-                if not compact_card:
-                    title_lines = title_lines[:3 if card_height < 210 else 5]
                 if category in ("成果報告", "週報提出") and card_height < 90:
                     text_y = cy + max(4, (card_height - len(title_lines) * 21) // 2)
                 else:
