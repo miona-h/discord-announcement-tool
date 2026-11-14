@@ -26,7 +26,7 @@ from generate_announcement import AnnouncementGenerator
 from monthly_overview import build_monthly_overview
 from calendar_image import (
     DEFAULT_CATEGORY_STYLES,
-    calendar_event_key_at_point,
+    calendar_event_hit_at_point,
     classify_event,
     event_display_text,
     fetch_instagram_profile_image,
@@ -192,6 +192,69 @@ def _touch_image_library_asset(path: str) -> None:
             os.utime(path, None)
     except OSError:
         pass
+
+
+def _render_image_library_picker(selected_path_key: str, widget_prefix: str) -> None:
+    """共通画像ライブラリをサムネイルで表示し、選択結果を保存する。"""
+    st.markdown("### 🖼️ 画像ライブラリ")
+    uploaded = st.file_uploader(
+        "新しい画像をライブラリへ追加",
+        type=["png", "jpg", "jpeg", "webp"],
+        key=f"{widget_prefix}_upload",
+        help=f"全予定で共通利用できます。最大{CALENDAR_IMAGE_LIBRARY_LIMIT}件です。",
+    )
+    if uploaded is not None:
+        saved_path, save_error = _save_image_library_asset(uploaded)
+        if save_error:
+            st.error(save_error)
+        elif saved_path:
+            st.session_state[selected_path_key] = saved_path
+
+    assets = _list_image_library()
+    st.caption(f"最近使用した順・{len(assets)}/{CALENDAR_IMAGE_LIBRARY_LIMIT}件")
+    page_size = 24
+    page_count = max(1, (len(assets) + page_size - 1) // page_size)
+    page = st.number_input(
+        "ページ", min_value=1, max_value=page_count, value=1, step=1,
+        key=f"{widget_prefix}_page",
+    )
+    page_assets = assets[(int(page) - 1) * page_size:int(page) * page_size]
+    current_path = st.session_state.get(selected_path_key)
+
+    columns = st.columns(6)
+    with columns[0]:
+        st.markdown("#### 画像なし")
+        if st.button(
+            "自動取得を使用" if current_path else "✓ 自動取得",
+            key=f"{widget_prefix}_auto",
+            use_container_width=True,
+        ):
+            st.session_state[selected_path_key] = None
+            st.rerun()
+    for index, (_, path) in enumerate(page_assets, start=1):
+        with columns[index % 6]:
+            st.image(_read_saved_asset(path), use_column_width=True)
+            selected = current_path == path
+            if st.button(
+                "✓ 選択中" if selected else "この画像を選択",
+                key=f"{widget_prefix}_asset_{hashlib.sha1(path.encode()).hexdigest()[:12]}",
+                type="primary" if selected else "secondary",
+                use_container_width=True,
+            ):
+                st.session_state[selected_path_key] = path
+                st.rerun()
+
+
+@st.cache_data(show_spinner=False, max_entries=24)
+def _cached_calendar_preview(events, year, month, category_colors, event_images) -> bytes:
+    """クリックのたびに同じプレビュー画像を再描画しない。"""
+    return generate_calendar_image(
+        events,
+        year,
+        month,
+        category_colors=category_colors,
+        event_images=event_images,
+    )
 
 
 def _use_streamlit_oauth() -> bool:
@@ -960,6 +1023,30 @@ if GOOGLE_API_AVAILABLE:
                 target_key = f"calendar_text_edit_target_{int(image_year)}_{int(image_month)}"
                 if target_key not in st.session_state or st.session_state[target_key] >= len(month_events):
                     st.session_state[target_key] = 0
+                focus_key = f"calendar_editor_focus_{int(image_year)}_{int(image_month)}"
+                if focus_key not in st.session_state:
+                    st.session_state[focus_key] = "card"
+
+                # 画像枠をクリックした場合は、次の高速な再描画でライブラリを画面先頭に直接表示する。
+                if st.session_state[focus_key] == "image":
+                    focused_index = int(st.session_state[target_key])
+                    focused_event = month_events[focused_index]
+                    focused_id = calendar_event_key(focused_event, focused_index)
+                    focused_path_key = (
+                        f"calendar_event_library_path_{int(image_year)}_{int(image_month)}_{focused_id}"
+                    )
+                    st.info(
+                        f"画像を選択：{focused_event.get('date', '')} {focused_event.get('time', '')}｜"
+                        f"{focused_event.get('_raw_summary', '') or focused_event.get('event_name', '')}"
+                    )
+                    if st.button("← カレンダー編集へ戻る", key=f"calendar_library_back_{focused_id}"):
+                        st.session_state[focus_key] = "card"
+                        st.rerun()
+                    _render_image_library_picker(
+                        focused_path_key,
+                        f"calendar_direct_library_{int(image_year)}_{int(image_month)}_{focused_id}",
+                    )
+                    st.stop()
 
                 preview_events = []
                 preview_event_images = {}
@@ -969,11 +1056,18 @@ if GOOGLE_API_AVAILABLE:
                     event_index_by_key[event_id] = event_index
                     event_copy = event.copy()
                     event_copy["_calendar_image_key"] = event_id
-                    text_key = f"calendar_display_text_{int(image_year)}_{int(image_month)}_{event_id}"
+                    text_key = f"calendar_saved_display_text_{int(image_year)}_{int(image_month)}_{event_id}"
+                    editor_key = f"calendar_text_editor_{int(image_year)}_{int(image_month)}_{event_id}"
+                    # Streamlitは画面から消えたウィジェット値を破棄するため、別の永続キーへ退避する。
+                    if editor_key in st.session_state:
+                        st.session_state[text_key] = st.session_state[editor_key]
                     event_copy["_calendar_display_text"] = st.session_state.get(
                         text_key, event_display_text(event)
                     )
-                    other_color_key = f"calendar_event_other_color_{int(image_year)}_{int(image_month)}_{event_id}"
+                    other_color_key = f"calendar_saved_other_color_{int(image_year)}_{int(image_month)}_{event_id}"
+                    color_editor_key = f"calendar_other_color_editor_{int(image_year)}_{int(image_month)}_{event_id}"
+                    if color_editor_key in st.session_state:
+                        st.session_state[other_color_key] = st.session_state[color_editor_key]
                     if classify_event(event_copy) == "その他":
                         event_copy["_calendar_background_color"] = st.session_state.get(
                             other_color_key, DEFAULT_CATEGORY_STYLES["その他"]
@@ -986,15 +1080,15 @@ if GOOGLE_API_AVAILABLE:
                             preview_event_images[event_id] = image_data
                     preview_events.append(event_copy)
 
-                preview_png = generate_calendar_image(
+                preview_png = _cached_calendar_preview(
                     preview_events,
                     int(image_year),
                     int(image_month),
-                    category_colors={
+                    {
                         category: st.session_state.get(f"calendar_color_{category}", default_color)
                         for category, default_color in DEFAULT_CATEGORY_STYLES.items()
                     },
-                    event_images=preview_event_images,
+                    preview_event_images,
                 )
                 st.caption("編集したい予定の枠内をクリックしてください")
                 if IMAGE_COORDINATES_AVAILABLE:
@@ -1010,16 +1104,19 @@ if GOOGLE_API_AVAILABLE:
                         if st.session_state.get(processed_key) != click_signature:
                             st.session_state[processed_key] = click_signature
                             scale = 1080 / preview_width
-                            clicked_event_key = calendar_event_key_at_point(
+                            clicked_hit = calendar_event_hit_at_point(
                                 preview_events,
                                 int(image_year),
                                 int(image_month),
                                 float(click_value["x"]) * scale,
                                 float(click_value["y"]) * scale,
                             )
+                            clicked_event_key = clicked_hit.get("event_key", "")
                             if clicked_event_key in event_index_by_key:
                                 st.session_state[target_key] = event_index_by_key[clicked_event_key]
-                                st.rerun()
+                                st.session_state[focus_key] = clicked_hit.get("region", "card")
+                                if st.session_state[focus_key] == "image":
+                                    st.rerun()
                 else:
                     st.image(preview_png, width=700)
                     st.warning(
@@ -1029,78 +1126,71 @@ if GOOGLE_API_AVAILABLE:
                 selected_event = month_events[edit_index]
                 selected_event_id = calendar_event_key(selected_event, edit_index)
                 selected_text_key = (
-                    f"calendar_display_text_{int(image_year)}_{int(image_month)}_{selected_event_id}"
+                    f"calendar_saved_display_text_{int(image_year)}_{int(image_month)}_{selected_event_id}"
+                )
+                selected_text_editor_key = (
+                    f"calendar_text_editor_{int(image_year)}_{int(image_month)}_{selected_event_id}"
                 )
                 selected_image_path_key = (
                     f"calendar_event_library_path_{int(image_year)}_{int(image_month)}_{selected_event_id}"
                 )
                 text_column, image_column = st.columns([3, 2])
                 with text_column:
+                    if selected_text_editor_key not in st.session_state:
+                        st.session_state[selected_text_editor_key] = st.session_state.get(
+                            selected_text_key, event_display_text(selected_event)
+                        )
                     st.text_area(
                         "画像に表示する文字（改行も反映）",
-                        value=event_display_text(selected_event),
                         height=180,
-                        key=selected_text_key,
+                        key=selected_text_editor_key,
                     )
+                    st.session_state[selected_text_key] = st.session_state[selected_text_editor_key]
                     if classify_event(selected_event) == "その他":
                         selected_other_color_key = (
-                            f"calendar_event_other_color_{int(image_year)}_{int(image_month)}_{selected_event_id}"
+                            f"calendar_saved_other_color_{int(image_year)}_{int(image_month)}_{selected_event_id}"
                         )
-                        if selected_other_color_key not in st.session_state:
-                            st.session_state[selected_other_color_key] = DEFAULT_CATEGORY_STYLES["その他"]
+                        selected_color_editor_key = (
+                            f"calendar_other_color_editor_{int(image_year)}_{int(image_month)}_{selected_event_id}"
+                        )
+                        if selected_color_editor_key not in st.session_state:
+                            st.session_state[selected_color_editor_key] = st.session_state.get(
+                                selected_other_color_key, DEFAULT_CATEGORY_STYLES["その他"]
+                            )
                         st.color_picker(
                             "この予定の背景色",
-                            key=selected_other_color_key,
+                            key=selected_color_editor_key,
                             help="「その他」に分類された予定だけ、予定ごとに色を設定できます。",
                         )
+                        st.session_state[selected_other_color_key] = st.session_state[selected_color_editor_key]
                 with image_column:
-                    uploaded_event_image = st.file_uploader(
-                        "ライブラリへ画像を追加",
-                        type=["png", "jpg", "jpeg", "webp"],
-                        key=f"{selected_image_path_key}_uploader",
-                        help=f"全予定で共通利用できます。最大{CALENDAR_IMAGE_LIBRARY_LIMIT}件です。",
-                    )
-                    if uploaded_event_image is not None:
-                        saved_path, save_error = _save_image_library_asset(uploaded_event_image)
-                        if save_error:
-                            st.error(save_error)
-                        elif saved_path:
-                            st.session_state[selected_image_path_key] = saved_path
-                            st.session_state[f"{selected_image_path_key}_selector"] = saved_path
-
-                    library_assets = _list_image_library()
-                    library_paths = [None] + [path for _, path in library_assets]
                     current_path = st.session_state.get(selected_image_path_key)
-                    default_index = library_paths.index(current_path) if current_path in library_paths else 0
-                    selected_library_path = st.selectbox(
-                        f"画像ライブラリ（{len(library_assets)}/{CALENDAR_IMAGE_LIBRARY_LIMIT}件）",
-                        library_paths,
-                        index=default_index,
-                        format_func=lambda path: "自動取得・カテゴリ画像を使用" if path is None else next(
-                            (label for label, asset_path in library_assets if asset_path == path),
-                            os.path.basename(path),
-                        ),
-                        key=f"{selected_image_path_key}_selector",
-                    )
-                    st.session_state[selected_image_path_key] = selected_library_path
-                    if selected_library_path:
-                        selected_image_data = _read_saved_asset(selected_library_path)
-                        st.image(selected_image_data, caption="この予定に使用する画像", width=150)
+                    st.markdown("**使用画像**")
+                    if current_path:
+                        st.image(_read_saved_asset(current_path), width=150)
                     else:
                         st.caption("画像未設定（Instagram画像またはカテゴリ画像を使用）")
+                    if st.button(
+                        "画像ライブラリを開く",
+                        key=f"open_calendar_library_{selected_event_id}",
+                        type="primary",
+                        use_container_width=True,
+                    ):
+                        st.session_state[focus_key] = "image"
+                        st.rerun()
                 st.caption("予定を切り替えて編集してください。入力内容と画像は生成時に反映されます。")
 
                 preview_rows = []
                 for event_index, event in enumerate(month_events):
                     event_copy = event.copy()
                     event_id = calendar_event_key(event, event_index)
-                    text_key = f"calendar_display_text_{int(image_year)}_{int(image_month)}_{event_id}"
+                    text_key = f"calendar_saved_display_text_{int(image_year)}_{int(image_month)}_{event_id}"
                     image_path_key = f"calendar_event_library_path_{int(image_year)}_{int(image_month)}_{event_id}"
                     event_copy["_calendar_display_text"] = st.session_state.get(
                         text_key, event_display_text(event)
                     )
                     event_copy["_calendar_image_key"] = event_id
-                    other_color_key = f"calendar_event_other_color_{int(image_year)}_{int(image_month)}_{event_id}"
+                    other_color_key = f"calendar_saved_other_color_{int(image_year)}_{int(image_month)}_{event_id}"
                     if classify_event(event_copy) == "その他":
                         event_copy["_calendar_background_color"] = st.session_state.get(
                             other_color_key, DEFAULT_CATEGORY_STYLES["その他"]
@@ -1127,26 +1217,35 @@ if GOOGLE_API_AVAILABLE:
                     if not management_assets:
                         st.info("ライブラリに画像はまだありません。")
                     else:
-                        management_path = st.selectbox(
-                            "削除する画像を選択",
-                            [path for _, path in management_assets],
-                            format_func=lambda path: next(
-                                (label for label, asset_path in management_assets if asset_path == path),
-                                os.path.basename(path),
-                            ),
-                            key="calendar_library_delete_target",
+                        management_page_size = 24
+                        management_page_count = max(
+                            1, (len(management_assets) + management_page_size - 1) // management_page_size
                         )
-                        st.image(_read_saved_asset(management_path), width=120)
-                        if st.button("ライブラリから削除", key="calendar_library_delete_button"):
-                            try:
-                                os.remove(management_path)
-                                for key, value in list(st.session_state.items()):
-                                    if key.startswith("calendar_event_library_path_") and value == management_path:
-                                        st.session_state[key] = None
-                                st.success("画像を削除しました。")
-                                st.rerun()
-                            except OSError as e:
-                                st.error(f"画像を削除できませんでした: {e}")
+                        management_page = st.number_input(
+                            "管理ページ", min_value=1, max_value=management_page_count,
+                            value=1, step=1, key="calendar_library_management_page",
+                        )
+                        page_assets = management_assets[
+                            (int(management_page) - 1) * management_page_size:
+                            int(management_page) * management_page_size
+                        ]
+                        management_columns = st.columns(6)
+                        for asset_index, (_, management_path) in enumerate(page_assets):
+                            with management_columns[asset_index % 6]:
+                                st.image(_read_saved_asset(management_path), use_column_width=True)
+                                delete_key = hashlib.sha1(management_path.encode()).hexdigest()[:12]
+                                if st.button(
+                                    "削除", key=f"calendar_library_delete_{delete_key}",
+                                    use_container_width=True,
+                                ):
+                                    try:
+                                        os.remove(management_path)
+                                        for key, value in list(st.session_state.items()):
+                                            if key.startswith("calendar_event_library_path_") and value == management_path:
+                                                st.session_state[key] = None
+                                        st.rerun()
+                                    except OSError as e:
+                                        st.error(f"画像を削除できませんでした: {e}")
 
             st.markdown("**カテゴリ別の背景色**")
             category_colors = {}

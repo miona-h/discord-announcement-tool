@@ -208,7 +208,10 @@ def _event_text_lines(event: Dict[str, Any], max_chars: int = 9) -> List[str]:
     elif category == "オフ会":
         lines.extend(_wrap_chars(summary, max_chars, 3))
     elif category == "オン会":
-        lines.extend(["オン会", "(in Zoom)"] if "zoom" in summary.lower() else ["オン会"])
+        if "万垢" in summary:
+            lines.extend(_wrap_chars(summary, max_chars, 3))
+        else:
+            lines.extend(["オン会", "(in Zoom)"] if "zoom" in summary.lower() else ["オン会"])
     else:
         lines.extend(_wrap_chars(summary, max_chars, 3))
 
@@ -259,10 +262,10 @@ def _visible_event_layout(day_events: List[Dict[str, Any]], card_top: int, card_
     return visible_events, card_boxes
 
 
-def calendar_event_key_at_point(
+def calendar_event_hit_at_point(
     events: List[Dict[str, Any]], year: int, month: int, x: float, y: float
-) -> str:
-    """1080×1920のカレンダー座標から、クリックされた予定キーを返す。"""
+) -> Dict[str, str]:
+    """クリックされた予定キーと、カード・画像枠のどちらかを返す。"""
     width, height = 1080, 1920
     margin, gap = 14, 6
     header_h, weekday_h = 260, 78
@@ -291,9 +294,25 @@ def calendar_event_key_at_point(
             visible_events, card_boxes = _visible_event_layout(day_events, y0 + 54, y0 + cell_h - 8)
             for event, (card_top, card_bottom) in zip(visible_events, card_boxes):
                 if card_top <= y <= card_bottom:
-                    return str(event.get("_calendar_image_key", "") or "")
-            return ""
-    return ""
+                    event_key = str(event.get("_calendar_image_key", "") or "")
+                    compact_card = len(day_events) > 1 and card_bottom - card_top < 180
+                    minimum_icon_height = 105 if compact_card else 150
+                    if card_bottom - card_top >= minimum_icon_height:
+                        icon_size = 38 if compact_card else min(70, card_bottom - card_top - 12)
+                        icon_x = x0 + (cell_w - icon_size) // 2
+                        icon_y = card_bottom - icon_size - 6
+                        if icon_x - 4 <= x <= icon_x + icon_size + 4 and icon_y - 4 <= y <= icon_y + icon_size + 4:
+                            return {"event_key": event_key, "region": "image"}
+                    return {"event_key": event_key, "region": "card"}
+            return {"event_key": "", "region": ""}
+    return {"event_key": "", "region": ""}
+
+
+def calendar_event_key_at_point(
+    events: List[Dict[str, Any]], year: int, month: int, x: float, y: float
+) -> str:
+    """後方互換用：クリックされた予定キーだけを返す。"""
+    return calendar_event_hit_at_point(events, year, month, x, y).get("event_key", "")
 
 
 def _wrap_chars(text: str, max_chars: int, max_lines: int) -> List[str]:
@@ -336,11 +355,12 @@ def _remove_dark_edge_background(source: Image.Image) -> Image.Image:
     return image
 
 
-def _read_image(data: Optional[bytes]) -> Optional[Image.Image]:
+def _read_image(data: Optional[bytes], remove_dark_background: bool = True) -> Optional[Image.Image]:
     if not data:
         return None
     try:
-        return _remove_dark_edge_background(Image.open(io.BytesIO(data)))
+        source = Image.open(io.BytesIO(data)).convert("RGBA")
+        return _remove_dark_edge_background(source) if remove_dark_background else source
     except Exception:
         return None
 
@@ -548,7 +568,13 @@ def generate_calendar_image(
                 title_lines = _event_text_lines(event, max_chars=7)
                 compact_card = len(day_events) > 1 and card_bottom - cy < 180
                 if compact_card:
-                    title_lines = title_lines[:2]
+                    if category in ("成果報告", "週報提出"):
+                        title_lines = title_lines[:2]
+                    elif len(title_lines) > 3:
+                        # 狭いカードでも、種別と講師名（末尾）を必ず残す。
+                        title_lines = title_lines[:2] + title_lines[-1:]
+                    else:
+                        title_lines = title_lines[:3]
                 card_height = card_bottom - cy
                 if not compact_card:
                     title_lines = title_lines[:3 if card_height < 210 else 5]
@@ -556,8 +582,8 @@ def generate_calendar_image(
                     text_y = cy + max(4, (card_height - len(title_lines) * 21) // 2)
                 else:
                     text_y = cy + 8
-                title_font = _event_font(14 if compact_card else 17)
-                title_step = 18 if compact_card else 21
+                title_font = _event_font(12 if compact_card else 17)
+                title_step = 15 if compact_card else 21
                 for line in title_lines:
                     draw.text(
                         (x0 + cell_w // 2, text_y), line, anchor="ma",
@@ -580,10 +606,11 @@ def generate_calendar_image(
 
                 # 編集画面で予定ごとに登録した画像を最優先で使用する。
                 event_image_key = str(event.get("_calendar_image_key", "") or "")
-                source = _read_image(individual_images.get(event_image_key))
+                # 予定ごとに選んだ写真は色を変えず、そのまま円形・四角形へ切り抜く。
+                source = _read_image(individual_images.get(event_image_key), remove_dark_background=False)
                 instagram_url = str(event.get("instagram_url", "") or "")
                 if source is None and instagram_url:
-                    source = _read_image(profile_images.get(instagram_url))
+                    source = _read_image(profile_images.get(instagram_url), remove_dark_background=False)
                 if source is None:
                     source = _read_image(illustrations.get(category))
                 minimum_icon_height = 105 if compact_card else 150
