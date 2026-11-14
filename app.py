@@ -1025,6 +1025,16 @@ if GOOGLE_API_AVAILABLE:
                         else 6.0
                     )
 
+                def default_calendar_setting(event, setting_name):
+                    is_submission = classify_event(event) in ("成果報告", "週報提出")
+                    if setting_name == "_calendar_font_size":
+                        return 16 if is_submission else 17
+                    if setting_name == "_calendar_max_lines":
+                        return 10
+                    if setting_name == "_calendar_height_weight":
+                        return 1.0 if is_submission else 6.0
+                    return None
+
                 def clear_event_draft(event_id):
                     for prefix in (
                         "calendar_draft_text", "calendar_draft_font_size",
@@ -1074,12 +1084,16 @@ if GOOGLE_API_AVAILABLE:
                     ):
                         saved_key = f"{saved_prefix}_{int(image_year)}_{int(image_month)}_{event_id}"
                         draft_key = f"{draft_prefix}_{int(image_year)}_{int(image_month)}_{event_id}"
+                        default_value = default_calendar_setting(event_copy, setting_name)
                         value = (
-                            st.session_state.get(draft_key, st.session_state.get(saved_key))
-                            if event_id == active_id else st.session_state.get(saved_key)
+                            st.session_state.get(
+                                draft_key,
+                                st.session_state.get(saved_key, default_value),
+                            )
+                            if event_id == active_id
+                            else st.session_state.get(saved_key, default_value)
                         )
-                        if value is not None:
-                            event_copy[setting_name] = value
+                        event_copy[setting_name] = value
                     other_color_key = f"calendar_saved_other_color_{int(image_year)}_{int(image_month)}_{event_id}"
                     draft_color_key = f"calendar_draft_other_color_{int(image_year)}_{int(image_month)}_{event_id}"
                     if classify_event(event_copy) == "その他":
@@ -1278,8 +1292,10 @@ if GOOGLE_API_AVAILABLE:
                         ("_calendar_height_weight", "calendar_saved_height_weight"),
                     ):
                         setting_key = f"{session_prefix}_{int(image_year)}_{int(image_month)}_{event_id}"
-                        if setting_key in st.session_state:
-                            event_copy[setting_name] = st.session_state[setting_key]
+                        event_copy[setting_name] = st.session_state.get(
+                            setting_key,
+                            default_calendar_setting(event_copy, setting_name),
+                        )
                     other_color_key = f"calendar_saved_other_color_{int(image_year)}_{int(image_month)}_{event_id}"
                     if classify_event(event_copy) == "その他":
                         event_copy["_calendar_background_color"] = st.session_state.get(
