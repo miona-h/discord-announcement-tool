@@ -45,6 +45,11 @@ TEMPLATE_SHEET_RANGE = "テンプレート!A:E"
 CALENDAR_ASSET_DIR = os.path.join(APP_DIR, "calendar_assets")
 CALENDAR_IMAGE_LIBRARY_DIR = os.path.join(CALENDAR_ASSET_DIR, "image_library")
 CALENDAR_IMAGE_LIBRARY_LIMIT = 300
+try:
+    with open(os.path.join(APP_DIR, "calendar_image.py"), "rb") as renderer_file:
+        CALENDAR_RENDERER_VERSION = hashlib.sha1(renderer_file.read()).hexdigest()[:12]
+except OSError:
+    CALENDAR_RENDERER_VERSION = "unavailable"
 
 try:
     from streamlit_oauth import OAuth2Component
@@ -250,8 +255,11 @@ def _render_image_library_picker(
 
 
 @st.cache_data(show_spinner=False, max_entries=24)
-def _cached_calendar_preview(events, year, month, category_colors, event_images) -> bytes:
-    """クリックのたびに同じプレビュー画像を再描画しない。"""
+def _cached_calendar_preview(
+    events, year, month, category_colors, event_images, renderer_version
+) -> bytes:
+    """描画コード更新時は古いプレビューキャッシュを使用しない。"""
+    del renderer_version
     return generate_calendar_image(
         events,
         year,
@@ -1131,6 +1139,7 @@ if GOOGLE_API_AVAILABLE:
                         for category, default_color in DEFAULT_CATEGORY_STYLES.items()
                     },
                     preview_event_images,
+                    CALENDAR_RENDERER_VERSION,
                 )
                 preview_column, editor_column = st.columns([3, 2], gap="large")
                 with preview_column:
