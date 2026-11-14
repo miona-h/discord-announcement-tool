@@ -18,6 +18,12 @@ import urllib.parse
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 from PIL import Image
+try:
+    from googleapiclient.discovery import build
+    from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
+    GOOGLE_DRIVE_LIBRARY_AVAILABLE = True
+except ImportError:
+    GOOGLE_DRIVE_LIBRARY_AVAILABLE = False
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -33,6 +39,7 @@ from calendar_image import (
     generate_calendar_image,
 )
 from config import CALENDAR_EXCLUDE_TITLES
+from live_textarea_component import live_textarea
 from google.oauth2.credentials import Credentials
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -47,6 +54,8 @@ TEMPLATE_SHEET_RANGE = "テンプレート!A:F"
 CALENDAR_ASSET_DIR = os.path.join(APP_DIR, "calendar_assets")
 CALENDAR_IMAGE_LIBRARY_DIR = os.path.join(CALENDAR_ASSET_DIR, "image_library")
 CALENDAR_IMAGE_LIBRARY_LIMIT = 300
+CALENDAR_IMAGE_LIBRARY_DRIVE_FOLDER = "SnsClub カレンダー画像ライブラリ"
+CALENDAR_IMAGE_LIBRARY_DRIVE_PREFIX = "gdrive://"
 try:
     with open(os.path.join(APP_DIR, "calendar_image.py"), "rb") as renderer_file:
         CALENDAR_RENDERER_VERSION = hashlib.sha1(renderer_file.read()).hexdigest()[:12]
@@ -101,6 +110,7 @@ GOOGLE_SCOPE_LIST = [
     "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/calendar.readonly",
     "https://www.googleapis.com/auth/spreadsheets.readonly",
+    "https://www.googleapis.com/auth/drive.file",
 ]
 GOOGLE_SCOPE_STR = " ".join(GOOGLE_SCOPE_LIST)
 
@@ -146,6 +156,21 @@ def _list_calendar_assets(category: str) -> list[tuple[str, str]]:
 
 
 def _read_saved_asset(path: str) -> bytes:
+    if str(path or "").startswith(CALENDAR_IMAGE_LIBRARY_DRIVE_PREFIX):
+        file_id = str(path)[len(CALENDAR_IMAGE_LIBRARY_DRIVE_PREFIX):]
+        try:
+            service = _get_image_library_drive_service()
+            if service is None:
+                return b""
+            buffer = io.BytesIO()
+            request = service.files().get_media(fileId=file_id)
+            downloader = MediaIoBaseDownload(buffer, request)
+            done = False
+            while not done:
+                _, done = downloader.next_chunk()
+            return buffer.getvalue()
+        except Exception:
+            return b""
     try:
         with open(path, "rb") as f:
             return f.read()
@@ -153,8 +178,105 @@ def _read_saved_asset(path: str) -> bytes:
         return b""
 
 
+def _get_image_library_drive_service():
+    """ログイン中のGoogleアカウントでDrive APIを返す。"""
+    if not GOOGLE_DRIVE_LIBRARY_AVAILABLE or "google_credentials" not in st.session_state:
+        return None
+    try:
+        creds = dict_to_credentials(st.session_state["google_credentials"])
+        if creds is None:
+            return None
+        creds, refreshed = refresh_credentials_if_needed(creds)
+        if refreshed:
+            st.session_state["google_credentials"] = refreshed
+        return build("drive", "v3", credentials=creds, cache_discovery=False)
+    except Exception:
+        return None
+
+
+def _image_library_drive_scope_granted() -> bool:
+    scopes = st.session_state.get("google_credentials", {}).get("scopes", [])
+    return "https://www.googleapis.com/auth/drive.file" in (scopes or [])
+
+
+def _get_image_library_drive_folder(service) -> str:
+    """画像ライブラリ用フォルダを取得し、なければ作成する。"""
+    query = (
+        "mimeType='application/vnd.google-apps.folder' and trashed=false "
+        "and appProperties has { key='snsclub_calendar_library' and value='1' }"
+    )
+    result = service.files().list(
+        q=query, spaces="drive", fields="files(id,name)", pageSize=10,
+    ).execute()
+    files = result.get("files", [])
+    if files:
+        return files[0]["id"]
+    folder = service.files().create(
+        body={
+            "name": CALENDAR_IMAGE_LIBRARY_DRIVE_FOLDER,
+            "mimeType": "application/vnd.google-apps.folder",
+            "appProperties": {"snsclub_calendar_library": "1"},
+        },
+        fields="id",
+    ).execute()
+    return folder["id"]
+
+
+def _upload_image_library_bytes(service, folder_id: str, data: bytes, original: str) -> str:
+    """重複を避けてDriveへ画像を保存し、Drive参照を返す。"""
+    digest = hashlib.sha256(data).hexdigest()[:16]
+    digest_query = (
+        f"'{folder_id}' in parents and trashed=false and "
+        f"appProperties has {{ key='sha256' and value='{digest}' }}"
+    )
+    found = service.files().list(
+        q=digest_query, spaces="drive", fields="files(id)", pageSize=1,
+    ).execute().get("files", [])
+    now = datetime.now(ZoneInfo("UTC")).isoformat()
+    if found:
+        file_id = found[0]["id"]
+        service.files().update(fileId=file_id, body={"modifiedTime": now}).execute()
+        return f"{CALENDAR_IMAGE_LIBRARY_DRIVE_PREFIX}{file_id}"
+    safe_name = re.sub(r"[^0-9A-Za-zぁ-んァ-ン一-鿿._-]+", "_", original or "image.png")
+    created = service.files().create(
+        body={
+            "name": f"{digest}__{safe_name}",
+            "parents": [folder_id],
+            "appProperties": {"sha256": digest, "snsclub_calendar_image": "1"},
+        },
+        media_body=MediaIoBaseUpload(io.BytesIO(data), mimetype="application/octet-stream", resumable=False),
+        fields="id",
+    ).execute()
+    return f"{CALENDAR_IMAGE_LIBRARY_DRIVE_PREFIX}{created['id']}"
+
+
 def _list_image_library() -> list[tuple[str, str]]:
-    """共通画像ライブラリを最終使用日時の新しい順で返す。"""
+    """Drive上の共通画像ライブラリを最終使用日時の新しい順で返す。"""
+    service = _get_image_library_drive_service()
+    if service is not None:
+        try:
+            folder_id = _get_image_library_drive_folder(service)
+            # 旧ローカルライブラリを初回接続時にDriveへ移行する。
+            if os.path.isdir(CALENDAR_IMAGE_LIBRARY_DIR):
+                for filename in os.listdir(CALENDAR_IMAGE_LIBRARY_DIR):
+                    local_path = os.path.join(CALENDAR_IMAGE_LIBRARY_DIR, filename)
+                    if os.path.isfile(local_path):
+                        with open(local_path, "rb") as source:
+                            _upload_image_library_bytes(service, folder_id, source.read(), filename.split("__", 1)[-1])
+                        os.remove(local_path)
+            result = service.files().list(
+                q=f"'{folder_id}' in parents and trashed=false",
+                spaces="drive",
+                orderBy="modifiedTime desc",
+                pageSize=CALENDAR_IMAGE_LIBRARY_LIMIT,
+                fields="files(id,name,modifiedTime)",
+            ).execute()
+            return [
+                (item["name"].split("__", 1)[-1], f"{CALENDAR_IMAGE_LIBRARY_DRIVE_PREFIX}{item['id']}")
+                for item in result.get("files", [])
+            ]
+        except Exception:
+            pass
     if not os.path.isdir(CALENDAR_IMAGE_LIBRARY_DIR):
         return []
     assets = []
@@ -174,6 +296,24 @@ def _save_image_library_asset(uploaded_file) -> tuple[str, str]:
     data = uploaded_file.getvalue()
     if not data:
         return "", "画像データが空です。"
+    service = _get_image_library_drive_service()
+    if service is not None:
+        try:
+            assets = _list_image_library()
+            digest = hashlib.sha256(data).hexdigest()[:16]
+            folder_id = _get_image_library_drive_folder(service)
+            duplicate_query = (
+                f"'{folder_id}' in parents and trashed=false and "
+                f"appProperties has {{ key='sha256' and value='{digest}' }}"
+            )
+            is_existing = bool(service.files().list(
+                q=duplicate_query, spaces="drive", fields="files(id)", pageSize=1,
+            ).execute().get("files", []))
+            if len(assets) >= CALENDAR_IMAGE_LIBRARY_LIMIT and not is_existing:
+                return "", f"画像ライブラリは最大{CALENDAR_IMAGE_LIBRARY_LIMIT}件です。不要な画像を削除してください。"
+            return _upload_image_library_bytes(service, folder_id, data, uploaded_file.name or "image.png"), ""
+        except Exception as e:
+            return "", f"Google Driveへの保存に失敗しました。Google連携をやり直してください: {e}"
     os.makedirs(CALENDAR_IMAGE_LIBRARY_DIR, exist_ok=True)
     original = os.path.basename(uploaded_file.name or "image.png")
     safe_name = re.sub(r"[^0-9A-Za-zぁ-んァ-ン一-鿿._-]+", "_", original)
@@ -195,10 +335,29 @@ def _save_image_library_asset(uploaded_file) -> tuple[str, str]:
 
 def _touch_image_library_asset(path: str) -> None:
     try:
+        if str(path or "").startswith(CALENDAR_IMAGE_LIBRARY_DRIVE_PREFIX):
+            service = _get_image_library_drive_service()
+            if service is not None:
+                file_id = str(path)[len(CALENDAR_IMAGE_LIBRARY_DRIVE_PREFIX):]
+                now = datetime.now(ZoneInfo("UTC")).isoformat()
+                service.files().update(fileId=file_id, body={"modifiedTime": now}).execute()
+            return
         if path and os.path.isfile(path):
             os.utime(path, None)
-    except OSError:
+    except Exception:
         pass
+
+
+def _delete_image_library_asset(path: str) -> None:
+    """ライブラリ画像を保存先に応じて削除する。"""
+    if str(path or "").startswith(CALENDAR_IMAGE_LIBRARY_DRIVE_PREFIX):
+        service = _get_image_library_drive_service()
+        if service is None:
+            raise OSError("Google Driveへ接続できません")
+        file_id = str(path)[len(CALENDAR_IMAGE_LIBRARY_DRIVE_PREFIX):]
+        service.files().delete(fileId=file_id).execute()
+        return
+    os.remove(path)
 
 
 def _render_image_library_picker(
@@ -206,6 +365,13 @@ def _render_image_library_picker(
 ) -> None:
     """共通画像ライブラリをサムネイルで表示し、選択結果を保存する。"""
     st.markdown("### 🖼️ 画像ライブラリ")
+    if "google_credentials" in st.session_state and not _image_library_drive_scope_granted():
+        st.warning(
+            "別端末でも画像を保存するには、新しいGoogle Drive権限が必要です。"
+            "一度Google連携を解除し、もう一度連携してください。"
+        )
+    elif _image_library_drive_scope_granted():
+        st.caption("Google Driveに保存中：同じGoogleアカウントなら別端末・翌月以降も利用できます。")
     uploaded = st.file_uploader(
         "新しい画像をライブラリへ追加",
         type=["png", "jpg", "jpeg", "webp"],
@@ -1162,6 +1328,8 @@ if GOOGLE_API_AVAILABLE:
                             else st.session_state.get(saved_key, default_value)
                         )
                         event_copy[setting_name] = value
+                        if setting_name == "_calendar_font_size":
+                            event_copy["_calendar_font_size_manual"] = value != default_value
                     other_color_key = f"calendar_saved_other_color_{int(image_year)}_{int(image_month)}_{event_id}"
                     draft_color_key = f"calendar_draft_other_color_{int(image_year)}_{int(image_month)}_{event_id}"
                     if classify_event(event_copy) == "その他":
@@ -1272,8 +1440,20 @@ if GOOGLE_API_AVAILABLE:
                             st.session_state[draft_text_key] = st.session_state.get(
                                 saved_text_key, event_display_text(focused_event)
                             )
-                        st.text_area("表示文字（改行も反映）", height=220, key=draft_text_key)
-                        st.caption("入力内容は左のプレビューへ自動反映されます。確定する場合は保存してください。")
+                        live_text_value = live_textarea(
+                            "表示文字（改行も反映）",
+                            value=st.session_state[draft_text_key],
+                            height=220,
+                            debounce=300,
+                            key=f"live_calendar_text_{int(image_year)}_{int(image_month)}_{focused_id}",
+                        )
+                        if live_text_value != st.session_state[draft_text_key]:
+                            st.session_state[draft_text_key] = live_text_value
+                            st.rerun()
+                        st.caption(
+                            "入力から約0.3秒後に左のプレビューへ自動反映されます。"
+                            "確定する場合は保存してください。"
+                        )
                         saved_font_key = f"calendar_saved_font_size_{int(image_year)}_{int(image_month)}_{focused_id}"
                         saved_lines_key = f"calendar_saved_max_lines_{int(image_year)}_{int(image_month)}_{focused_id}"
                         saved_weight_key = f"calendar_saved_height_weight_{int(image_year)}_{int(image_month)}_{focused_id}"
@@ -1343,6 +1523,12 @@ if GOOGLE_API_AVAILABLE:
                             setting_key,
                             default_calendar_setting(event_copy, setting_name),
                         )
+                        if setting_name == "_calendar_font_size":
+                            default_font_size = default_calendar_setting(event_copy, setting_name)
+                            event_copy["_calendar_font_size_manual"] = (
+                                setting_key in st.session_state
+                                and event_copy[setting_name] != default_font_size
+                            )
                     other_color_key = f"calendar_saved_other_color_{int(image_year)}_{int(image_month)}_{event_id}"
                     if classify_event(event_copy) == "その他":
                         event_copy["_calendar_background_color"] = st.session_state.get(
@@ -1392,12 +1578,12 @@ if GOOGLE_API_AVAILABLE:
                                     use_container_width=True,
                                 ):
                                     try:
-                                        os.remove(management_path)
+                                        _delete_image_library_asset(management_path)
                                         for key, value in list(st.session_state.items()):
                                             if key.startswith("calendar_event_library_path_") and value == management_path:
                                                 st.session_state[key] = None
                                         st.rerun()
-                                    except OSError as e:
+                                    except Exception as e:
                                         st.error(f"画像を削除できませんでした: {e}")
 
             st.markdown("**カテゴリ別の背景色**")
