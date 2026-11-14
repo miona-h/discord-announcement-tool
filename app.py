@@ -1276,6 +1276,7 @@ if GOOGLE_API_AVAILABLE:
                 def clear_event_draft(event_id):
                     for prefix in (
                         "calendar_draft_text", "calendar_draft_font_size",
+                        "calendar_draft_font_size_manual",
                         "calendar_draft_max_lines", "calendar_draft_height_weight",
                         "calendar_draft_other_color", "calendar_draft_image_path",
                         "calendar_draft_remove_background",
@@ -1333,7 +1334,19 @@ if GOOGLE_API_AVAILABLE:
                         )
                         event_copy[setting_name] = value
                         if setting_name == "_calendar_font_size":
-                            event_copy["_calendar_font_size_manual"] = value != default_value
+                            draft_manual_key = (
+                                f"calendar_draft_font_size_manual_{int(image_year)}_"
+                                f"{int(image_month)}_{event_id}"
+                            )
+                            saved_manual_key = (
+                                f"calendar_saved_font_size_manual_{int(image_year)}_"
+                                f"{int(image_month)}_{event_id}"
+                            )
+                            event_copy["_calendar_font_size_manual"] = bool(
+                                (event_id == active_id and st.session_state.get(draft_manual_key))
+                                or st.session_state.get(saved_manual_key)
+                                or value != default_value
+                            )
                     other_color_key = f"calendar_saved_other_color_{int(image_year)}_{int(image_month)}_{event_id}"
                     draft_color_key = f"calendar_draft_other_color_{int(image_year)}_{int(image_month)}_{event_id}"
                     if classify_event(event_copy) == "その他":
@@ -1469,6 +1482,14 @@ if GOOGLE_API_AVAILABLE:
                         saved_lines_key = f"calendar_saved_max_lines_{int(image_year)}_{int(image_month)}_{focused_id}"
                         saved_weight_key = f"calendar_saved_height_weight_{int(image_year)}_{int(image_month)}_{focused_id}"
                         draft_font_key = f"calendar_draft_font_size_{int(image_year)}_{int(image_month)}_{focused_id}"
+                        draft_font_manual_key = (
+                            f"calendar_draft_font_size_manual_{int(image_year)}_"
+                            f"{int(image_month)}_{focused_id}"
+                        )
+                        saved_font_manual_key = (
+                            f"calendar_saved_font_size_manual_{int(image_year)}_"
+                            f"{int(image_month)}_{focused_id}"
+                        )
                         draft_lines_key = f"calendar_draft_max_lines_{int(image_year)}_{int(image_month)}_{focused_id}"
                         draft_weight_key = f"calendar_draft_height_weight_{int(image_year)}_{int(image_month)}_{focused_id}"
                         default_font_size = (
@@ -1486,7 +1507,10 @@ if GOOGLE_API_AVAILABLE:
                             st.session_state[draft_weight_key] = st.session_state.get(
                                 saved_weight_key, default_height_weight(focused_index)
                             )
-                        st.slider("文字サイズ", 8, 28, key=draft_font_key)
+                        st.slider(
+                            "文字サイズ", 8, 28, key=draft_font_key,
+                            on_change=lambda key=draft_font_manual_key: st.session_state.__setitem__(key, True),
+                        )
                         st.slider("最大行数", 1, 10, key=draft_lines_key)
                         st.slider("予定の縦幅比率", 0.5, 10.0, step=0.5, key=draft_weight_key)
                         st.caption("同じ日の他の予定との比率で縦幅が決まります。")
@@ -1501,6 +1525,10 @@ if GOOGLE_API_AVAILABLE:
                         if st.button("保存", key=f"save_calendar_text_edit_{focused_id}", type="primary"):
                             st.session_state[saved_text_key] = st.session_state[draft_text_key]
                             st.session_state[saved_font_key] = st.session_state[draft_font_key]
+                            st.session_state[saved_font_manual_key] = bool(
+                                st.session_state.get(draft_font_manual_key)
+                                or st.session_state[draft_font_key] != default_font_size
+                            )
                             st.session_state[saved_lines_key] = st.session_state[draft_lines_key]
                             st.session_state[saved_weight_key] = st.session_state[draft_weight_key]
                             if classify_event(focused_event) == "その他":
@@ -1536,9 +1564,16 @@ if GOOGLE_API_AVAILABLE:
                         )
                         if setting_name == "_calendar_font_size":
                             default_font_size = default_calendar_setting(event_copy, setting_name)
+                            saved_manual_key = (
+                                f"calendar_saved_font_size_manual_{int(image_year)}_"
+                                f"{int(image_month)}_{event_id}"
+                            )
                             event_copy["_calendar_font_size_manual"] = (
-                                setting_key in st.session_state
-                                and event_copy[setting_name] != default_font_size
+                                bool(st.session_state.get(saved_manual_key))
+                                or (
+                                    setting_key in st.session_state
+                                    and event_copy[setting_name] != default_font_size
+                                )
                             )
                     other_color_key = f"calendar_saved_other_color_{int(image_year)}_{int(image_month)}_{event_id}"
                     if classify_event(event_copy) == "その他":
