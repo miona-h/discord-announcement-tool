@@ -1016,6 +1016,27 @@ if GOOGLE_API_AVAILABLE:
                     ))
                     return hashlib.sha1(raw_key.encode("utf-8")).hexdigest()[:16]
 
+                def default_height_weight(selected_index):
+                    selected = month_events[selected_index]
+                    selected_day = str(selected.get("date", ""))
+                    same_day = [
+                        (index, event) for index, event in enumerate(month_events)
+                        if str(event.get("date", "")) == selected_day
+                    ]
+                    submissions = [
+                        pair for pair in same_day
+                        if classify_event(pair[1]) in ("成果報告", "週報提出")
+                    ]
+                    regulars = [
+                        pair for pair in same_day
+                        if classify_event(pair[1]) not in ("成果報告", "週報提出")
+                    ]
+                    if len(submissions) >= 2 and regulars:
+                        return 1.0 if classify_event(selected) in ("成果報告", "週報提出") else 4.0
+                    if len(submissions) == 1 and regulars and len(same_day) == 2:
+                        return 1.0 if classify_event(selected) in ("成果報告", "週報提出") else 3.0
+                    return 1.0
+
                 st.markdown("### 🖼️ 画像プレビュー編集")
                 st.caption(
                     "カレンダー画像内の予定を直接クリックすると、文字・画像・背景色を編集できます。"
@@ -1048,6 +1069,57 @@ if GOOGLE_API_AVAILABLE:
                     )
                     st.stop()
 
+                if st.session_state[focus_key] == "text":
+                    focused_index = int(st.session_state[target_key])
+                    focused_event = month_events[focused_index]
+                    focused_id = calendar_event_key(focused_event, focused_index)
+                    saved_text_key = f"calendar_saved_display_text_{int(image_year)}_{int(image_month)}_{focused_id}"
+                    text_editor_key = f"calendar_text_editor_{int(image_year)}_{int(image_month)}_{focused_id}"
+                    if text_editor_key not in st.session_state:
+                        st.session_state[text_editor_key] = st.session_state.get(
+                            saved_text_key, event_display_text(focused_event)
+                        )
+                    st.info(
+                        f"予定を編集：{focused_event.get('date', '')} {focused_event.get('time', '')}｜"
+                        f"{focused_event.get('_raw_summary', '') or focused_event.get('event_name', '')}"
+                    )
+                    if st.button("← カレンダーへ戻る", key=f"calendar_text_back_{focused_id}"):
+                        st.session_state[saved_text_key] = st.session_state[text_editor_key]
+                        st.session_state[focus_key] = "card"
+                        st.rerun()
+                    st.text_area(
+                        "画像に表示する文字（改行も反映）",
+                        height=220,
+                        key=text_editor_key,
+                    )
+                    st.session_state[saved_text_key] = st.session_state[text_editor_key]
+                    setting_columns = st.columns(3)
+                    font_key = f"calendar_saved_font_size_{int(image_year)}_{int(image_month)}_{focused_id}"
+                    lines_key = f"calendar_saved_max_lines_{int(image_year)}_{int(image_month)}_{focused_id}"
+                    weight_key = f"calendar_saved_height_weight_{int(image_year)}_{int(image_month)}_{focused_id}"
+                    if font_key not in st.session_state:
+                        st.session_state[font_key] = 14
+                    if lines_key not in st.session_state:
+                        st.session_state[lines_key] = 6
+                    if weight_key not in st.session_state:
+                        st.session_state[weight_key] = default_height_weight(focused_index)
+                    with setting_columns[0]:
+                        st.slider("文字サイズ", 8, 28, key=font_key)
+                    with setting_columns[1]:
+                        st.slider("最大行数", 1, 10, key=lines_key)
+                    with setting_columns[2]:
+                        st.slider(
+                            "予定の縦幅比率", 0.5, 10.0,
+                            step=0.5, key=weight_key,
+                        )
+                    st.caption("同じ日の他の予定との比率で縦幅が決まります。例：1・1・4なら1/6・1/6・4/6です。")
+                    if classify_event(focused_event) == "その他":
+                        color_key = f"calendar_saved_other_color_{int(image_year)}_{int(image_month)}_{focused_id}"
+                        if color_key not in st.session_state:
+                            st.session_state[color_key] = DEFAULT_CATEGORY_STYLES["その他"]
+                        st.color_picker("この予定の背景色", key=color_key)
+                    st.stop()
+
                 preview_events = []
                 preview_event_images = {}
                 event_index_by_key = {}
@@ -1064,6 +1136,14 @@ if GOOGLE_API_AVAILABLE:
                     event_copy["_calendar_display_text"] = st.session_state.get(
                         text_key, event_display_text(event)
                     )
+                    for setting_name, session_prefix in (
+                        ("_calendar_font_size", "calendar_saved_font_size"),
+                        ("_calendar_max_lines", "calendar_saved_max_lines"),
+                        ("_calendar_height_weight", "calendar_saved_height_weight"),
+                    ):
+                        setting_key = f"{session_prefix}_{int(image_year)}_{int(image_month)}_{event_id}"
+                        if setting_key in st.session_state:
+                            event_copy[setting_name] = st.session_state[setting_key]
                     other_color_key = f"calendar_saved_other_color_{int(image_year)}_{int(image_month)}_{event_id}"
                     color_editor_key = f"calendar_other_color_editor_{int(image_year)}_{int(image_month)}_{event_id}"
                     if color_editor_key in st.session_state:
@@ -1114,72 +1194,15 @@ if GOOGLE_API_AVAILABLE:
                             clicked_event_key = clicked_hit.get("event_key", "")
                             if clicked_event_key in event_index_by_key:
                                 st.session_state[target_key] = event_index_by_key[clicked_event_key]
-                                st.session_state[focus_key] = clicked_hit.get("region", "card")
-                                if st.session_state[focus_key] == "image":
-                                    st.rerun()
+                                st.session_state[focus_key] = (
+                                    "image" if clicked_hit.get("region") == "image" else "text"
+                                )
+                                st.rerun()
                 else:
                     st.image(preview_png, width=700)
                     st.warning(
                         "画像クリック機能の追加ライブラリが未導入です。requirements.txtを更新して再デプロイしてください。"
                     )
-                edit_index = int(st.session_state[target_key])
-                selected_event = month_events[edit_index]
-                selected_event_id = calendar_event_key(selected_event, edit_index)
-                selected_text_key = (
-                    f"calendar_saved_display_text_{int(image_year)}_{int(image_month)}_{selected_event_id}"
-                )
-                selected_text_editor_key = (
-                    f"calendar_text_editor_{int(image_year)}_{int(image_month)}_{selected_event_id}"
-                )
-                selected_image_path_key = (
-                    f"calendar_event_library_path_{int(image_year)}_{int(image_month)}_{selected_event_id}"
-                )
-                text_column, image_column = st.columns([3, 2])
-                with text_column:
-                    if selected_text_editor_key not in st.session_state:
-                        st.session_state[selected_text_editor_key] = st.session_state.get(
-                            selected_text_key, event_display_text(selected_event)
-                        )
-                    st.text_area(
-                        "画像に表示する文字（改行も反映）",
-                        height=180,
-                        key=selected_text_editor_key,
-                    )
-                    st.session_state[selected_text_key] = st.session_state[selected_text_editor_key]
-                    if classify_event(selected_event) == "その他":
-                        selected_other_color_key = (
-                            f"calendar_saved_other_color_{int(image_year)}_{int(image_month)}_{selected_event_id}"
-                        )
-                        selected_color_editor_key = (
-                            f"calendar_other_color_editor_{int(image_year)}_{int(image_month)}_{selected_event_id}"
-                        )
-                        if selected_color_editor_key not in st.session_state:
-                            st.session_state[selected_color_editor_key] = st.session_state.get(
-                                selected_other_color_key, DEFAULT_CATEGORY_STYLES["その他"]
-                            )
-                        st.color_picker(
-                            "この予定の背景色",
-                            key=selected_color_editor_key,
-                            help="「その他」に分類された予定だけ、予定ごとに色を設定できます。",
-                        )
-                        st.session_state[selected_other_color_key] = st.session_state[selected_color_editor_key]
-                with image_column:
-                    current_path = st.session_state.get(selected_image_path_key)
-                    st.markdown("**使用画像**")
-                    if current_path:
-                        st.image(_read_saved_asset(current_path), width=150)
-                    else:
-                        st.caption("画像未設定（Instagram画像またはカテゴリ画像を使用）")
-                    if st.button(
-                        "画像ライブラリを開く",
-                        key=f"open_calendar_library_{selected_event_id}",
-                        type="primary",
-                        use_container_width=True,
-                    ):
-                        st.session_state[focus_key] = "image"
-                        st.rerun()
-                st.caption("予定を切り替えて編集してください。入力内容と画像は生成時に反映されます。")
-
                 preview_rows = []
                 for event_index, event in enumerate(month_events):
                     event_copy = event.copy()
@@ -1190,6 +1213,14 @@ if GOOGLE_API_AVAILABLE:
                         text_key, event_display_text(event)
                     )
                     event_copy["_calendar_image_key"] = event_id
+                    for setting_name, session_prefix in (
+                        ("_calendar_font_size", "calendar_saved_font_size"),
+                        ("_calendar_max_lines", "calendar_saved_max_lines"),
+                        ("_calendar_height_weight", "calendar_saved_height_weight"),
+                    ):
+                        setting_key = f"{session_prefix}_{int(image_year)}_{int(image_month)}_{event_id}"
+                        if setting_key in st.session_state:
+                            event_copy[setting_name] = st.session_state[setting_key]
                     other_color_key = f"calendar_saved_other_color_{int(image_year)}_{int(image_month)}_{event_id}"
                     if classify_event(event_copy) == "その他":
                         event_copy["_calendar_background_color"] = st.session_state.get(

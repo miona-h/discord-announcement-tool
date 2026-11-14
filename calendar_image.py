@@ -13,7 +13,7 @@ from collections import deque
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
-from PIL import Image, ImageDraw, ImageFont, ImageOps
+from PIL import Image, ImageChops, ImageDraw, ImageFont, ImageOps
 
 try:
     import jpholiday
@@ -168,7 +168,7 @@ def _event_text_lines(event: Dict[str, Any], max_chars: int = 9) -> List[str]:
     override = event.get("_calendar_display_text")
     if override is not None and str(override).strip():
         # プレビュー画面で入力した改行をそのまま採用する。
-        return [line.strip() for line in str(override).splitlines() if line.strip()][:6]
+        return [line.strip() for line in str(override).splitlines() if line.strip()][:10]
     category = classify_event(event)
     summary = _display_title(event)
     event_type = str(event.get("event_type", "") or "")
@@ -237,28 +237,35 @@ def _visible_event_layout(day_events: List[Dict[str, Any]], card_top: int, card_
     ]
     if len(submission_events) >= 2 and regular_events:
         visible_events = submission_events[:2] + regular_events[:1]
-        banner_height = max(34, int(available_height / 6))
-        first_bottom = card_top + banner_height
-        second_top = first_bottom + 5
-        second_bottom = second_top + banner_height
-        card_boxes = [
-            (card_top, first_bottom),
-            (second_top, second_bottom),
-            (second_bottom + 5, card_bottom_limit),
-        ]
+        default_weights = [1.0, 1.0, 4.0]
     elif len(submission_events) == 1 and regular_events and len(day_events) == 2:
         visible_events = submission_events[:1] + regular_events[:1]
-        banner_height = max(46, int(available_height * 0.25))
-        card_boxes = [
-            (card_top, card_top + banner_height),
-            (card_top + banner_height + 5, card_bottom_limit),
-        ]
+        default_weights = [1.0, 3.0]
     else:
-        card_space = max(58, available_height // max(1, len(visible_events)))
-        card_boxes = []
-        for idx in range(len(visible_events)):
-            cy = card_top + idx * card_space
-            card_boxes.append((cy, min(card_bottom_limit, cy + card_space - 5)))
+        default_weights = [1.0] * len(visible_events)
+
+    if not visible_events:
+        return [], []
+    weights = []
+    for event, default_weight in zip(visible_events, default_weights):
+        try:
+            weights.append(max(0.5, float(event.get("_calendar_height_weight", default_weight))))
+        except (TypeError, ValueError):
+            weights.append(default_weight)
+    total_gap = 5 * (len(visible_events) - 1)
+    usable_height = max(len(visible_events) * 20, available_height - total_gap)
+    weight_total = sum(weights) or 1
+    card_boxes = []
+    cursor = card_top
+    allocated = 0
+    for index, weight in enumerate(weights):
+        if index == len(weights) - 1:
+            event_height = usable_height - allocated
+        else:
+            event_height = max(20, round(usable_height * weight / weight_total))
+            allocated += event_height
+        card_boxes.append((cursor, min(card_bottom_limit, cursor + event_height)))
+        cursor += event_height + 5
     return visible_events, card_boxes
 
 
@@ -399,8 +406,10 @@ def _circle_image(source: Image.Image, size: int) -> Image.Image:
     square = ImageOps.fit(source.convert("RGBA"), (size, size), method=Image.Resampling.LANCZOS)
     mask = Image.new("L", (size, size), 0)
     ImageDraw.Draw(mask).ellipse((0, 0, size - 1, size - 1), fill=255)
+    combined_alpha = ImageChops.multiply(square.getchannel("A"), mask)
+    square.putalpha(combined_alpha)
     out = Image.new("RGBA", (size, size), (255, 255, 255, 0))
-    out.paste(square, (0, 0), mask)
+    out.alpha_composite(square)
     return out
 
 
@@ -446,7 +455,10 @@ def _paste_rotated_pictogram(
     if kind == "heart":
         icon.rounded_rectangle((7, 10, 70, 61), radius=16, fill=color)
         icon.polygon([(48, 57), (60, 78), (64, 57)], fill=color)
-        icon.text((39, 35), "♥", anchor="mm", font=_font(34, True), fill="#FFFFFF")
+        # フォント依存のハート記号は環境によって□になるため、図形として描画する。
+        icon.ellipse((23, 23, 41, 41), fill="#FFFFFF")
+        icon.ellipse((38, 23, 56, 41), fill="#FFFFFF")
+        icon.polygon([(23, 33), (56, 33), (39, 53)], fill="#FFFFFF")
     elif kind == "phone":
         icon.rounded_rectangle((22, 7, 65, 77), radius=11, outline=color, width=9)
         icon.rounded_rectangle((34, 14, 53, 20), radius=3, fill=color)
@@ -567,7 +579,13 @@ def generate_calendar_image(
                 draw.rounded_rectangle((x0 + 7, cy, x1 - 7, card_bottom), radius=13, fill=event_color, outline="#FFFFFF", width=2)
                 title_lines = _event_text_lines(event, max_chars=7)
                 compact_card = len(day_events) > 1 and card_bottom - cy < 180
-                if compact_card:
+                custom_max_lines = event.get("_calendar_max_lines")
+                if custom_max_lines is not None:
+                    try:
+                        title_lines = title_lines[:max(1, min(10, int(custom_max_lines)))]
+                    except (TypeError, ValueError):
+                        pass
+                elif compact_card:
                     if category in ("成果報告", "週報提出"):
                         title_lines = title_lines[:2]
                     elif len(title_lines) > 3:
@@ -582,8 +600,12 @@ def generate_calendar_image(
                     text_y = cy + max(4, (card_height - len(title_lines) * 21) // 2)
                 else:
                     text_y = cy + 8
-                title_font = _event_font(12 if compact_card else 17)
-                title_step = 15 if compact_card else 21
+                try:
+                    title_font_size = max(8, min(28, int(event.get("_calendar_font_size"))))
+                except (TypeError, ValueError):
+                    title_font_size = 12 if compact_card else 17
+                title_font = _event_font(title_font_size)
+                title_step = title_font_size + 3
                 for line in title_lines:
                     draw.text(
                         (x0 + cell_w // 2, text_y), line, anchor="ma",
@@ -633,7 +655,8 @@ def generate_calendar_image(
                             ImageDraw.Draw(mask).rounded_rectangle(
                                 (0, 0, icon_size - 1, icon_size - 1), radius=8, fill=255
                             )
-                            image.paste(fitted, (icon_x, icon_y), mask)
+                            fitted.putalpha(ImageChops.multiply(fitted.getchannel("A"), mask))
+                            image.alpha_composite(fitted, (icon_x, icon_y))
                     else:
                         # 講師画像は常に丸フレームを表示し、未登録時も追加位置が分かるようにする。
                         draw.ellipse(
