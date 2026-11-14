@@ -637,11 +637,40 @@ def generate_calendar_image(
                     text_y = cy + 4
                 else:
                     text_y = cy + 8
-                # タイトル・講師名が開催時間や画像へ重ならない範囲で、最大の文字サイズを使う。
+                center_x = x0 + cell_w // 2
+                time_font = _event_font(16 if compact_card else 19)
+                if show_time:
+                    time_top = draw.textbbox(
+                        (center_x, time_y), time_text, anchor="mm", font=time_font,
+                    )[1]
+                    safe_title_bottom = time_top - 7
+                else:
+                    safe_title_bottom = title_bottom_limit
+
+                def measured_title_bottom(font_size):
+                    """空行を含むタイトル全体の、実際の描画下端を返す。"""
+                    font = _event_font(font_size)
+                    step = font_size + 3
+                    bottom = text_y
+                    for line_index, line in enumerate(title_lines):
+                        line_y = text_y + line_index * step
+                        if line:
+                            bottom = max(
+                                bottom,
+                                draw.textbbox(
+                                    (center_x, line_y), line,
+                                    anchor="ma", font=font,
+                                )[3],
+                            )
+                        else:
+                            bottom = max(bottom, line_y + step)
+                    return bottom
+
+                # 実際の文字領域が開催時間や画像へ接触している間だけ縮小する。
                 while (
-                    title_font_size > 8
+                    title_font_size > 6
                     and title_lines
-                    and len(title_lines) * (title_font_size + 3) > title_bottom_limit - text_y
+                    and measured_title_bottom(title_font_size) > safe_title_bottom
                 ):
                     title_font_size -= 1
                 title_font = _event_font(title_font_size)
@@ -660,7 +689,7 @@ def generate_calendar_image(
                 if show_time:
                     draw.text(
                         (x0 + cell_w // 2, time_y), time_text, anchor="mm",
-                        font=_event_font(16 if compact_card else 19), fill="#101A2E",
+                        font=time_font, fill="#101A2E",
                     )
 
                 # 編集画面で予定ごとに登録した画像を最優先で使用する。
