@@ -487,6 +487,12 @@ def _apply_template_keyword_match(event_data: dict) -> dict:
     if not event_name:
         return result
 
+    # テンプレートCSVの同期前・キャッシュ更新前でも、講師名を持たない
+    # 初心者ツール相談会を確実に事前告知テンプレートへ割り当てる。
+    if "初心者ツール相談会" in event_name:
+        result["event_type"] = "初心者ツール相談会（事前告知）"
+        return result
+
     best = None
     for row_index, rec in enumerate(_load_template_records()):
         for keywords in _keyword_groups(rec.get("match_keywords", "")):
@@ -498,6 +504,16 @@ def _apply_template_keyword_match(event_data: dict) -> dict:
     if best and best[1]:
         result["event_type"] = best[1]
     return result
+
+
+def _validate_announcement_event(generator: AnnouncementGenerator, event_data: dict) -> tuple[bool, list[str]]:
+    """告知文生成用の検証。初心者ツール相談会では講師名を要求しない。"""
+    is_valid, errors = generator.validate_event_data(event_data)
+    event_type = str(event_data.get("event_type", "") or "")
+    if "初心者ツール相談会" in event_type:
+        errors = [error for error in errors if "teacher_name" not in error]
+        is_valid = not errors
+    return is_valid, errors
 
 
 def _find_template_records(event_type: str) -> list[dict]:
@@ -861,7 +877,7 @@ if GOOGLE_API_AVAILABLE:
                         ed.pop(k, None)
                     try:
                         generator = AnnouncementGenerator()
-                        is_valid, errors = generator.validate_event_data(ed)
+                        is_valid, errors = _validate_announcement_event(generator, ed)
                         if not is_valid:
                             st.warning("入力情報に不備があります（手動入力タブで補完してください）")
                             for err in errors:
@@ -923,7 +939,7 @@ if GOOGLE_API_AVAILABLE:
                             else:
                                 ev_row = ev_copy
                             row_type = ev_row.get("event_type", "")
-                            is_valid = generator.validate_event_data(ev_row)[0]
+                            is_valid = _validate_announcement_event(generator, ev_row)[0]
                             if not is_valid:
                                 continue
                             items = _generate_announcement_items(generator, ev_row)
@@ -1613,7 +1629,7 @@ if st.button("📝 告知文を生成", type="primary", key="btn_generate"):
     if event_data:
         try:
             generator = AnnouncementGenerator()
-            is_valid, errors = generator.validate_event_data(event_data)
+            is_valid, errors = _validate_announcement_event(generator, event_data)
             if not is_valid:
                 st.warning("入力情報に不備があります")
                 for err in errors:

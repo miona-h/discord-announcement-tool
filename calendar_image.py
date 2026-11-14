@@ -750,10 +750,22 @@ def generate_calendar_image(
                     title_font_size -= 1
                 title_font = _event_font(title_font_size)
                 title_step = title_font_size + 3
-                if category in ("成果報告", "週報提出") and card_height < 90:
-                    text_y = cy + max(
-                        4,
-                        (card_height - len(title_lines) * title_step) // 2,
+
+                # 予定名は、カード上端から開催時間・画像枠の直前までの
+                # 利用可能な領域内で上下中央に配置する。
+                if title_lines:
+                    title_area_top = cy + 4
+                    drawn_title_height = max(
+                        title_step,
+                        measured_title_bottom(title_font_size) - text_y,
+                    )
+                    available_title_height = max(
+                        drawn_title_height,
+                        safe_title_bottom - title_area_top,
+                    )
+                    text_y = title_area_top + max(
+                        0,
+                        (available_title_height - drawn_title_height) // 2,
                     )
                 for line in title_lines:
                     _draw_event_line(
