@@ -107,7 +107,8 @@ def _num(i: int) -> str:
 def build_monthly_overview(events: List[Dict[str, Any]], month_str: str) -> str:
     """
     イベント一覧から月全体の案内文を生成する。
-    順序: その他ジャンル（あれば）→ オン会（あれば）→ 特別講義（あれば）→ 講師対談 → 生徒対談
+    順序: フォロワー別グルコン（あれば）→ その他ジャンル（あれば）→ オン会（あれば）
+          → 特別講義（あれば）→ 講師対談 → 生徒対談
           → ジャンル特化グルコン（ジャンルごと・日付順）
     """
     year = datetime.now().year
@@ -116,6 +117,9 @@ def build_monthly_overview(events: List[Dict[str, Any]], month_str: str) -> str:
     for ed in events:
         ev = {k: v for k, v in ed.items() if not k.startswith("_")}
         et = ev.get("event_type", "")
+        event_identity = f"{et} {ev.get('event_name', '')}"
+        if "成果報告" in event_identity:
+            continue
         if "（当日告知）" not in et and "（事前告知）" not in et:
             continue
         clean.append(ev)
@@ -124,12 +128,22 @@ def build_monthly_overview(events: List[Dict[str, Any]], month_str: str) -> str:
     instructor = []    # 講師対談
     student = []      # 生徒対談
     genre_events = []  # ジャンル特化グルコン
+    follower_events = []  # フォロワー別グルコン
     online_events = []  # SnsClubオン会・万垢生限定オン会
+    beginner_events = []  # 初心者ツール相談会
     other = []         # 既知のテンプレートに当てはまらないイベント
 
     for ev in clean:
         et = ev.get("event_type", "")
-        if "特別講義" in et:
+        event_name = str(ev.get("event_name", ""))
+        # スプレッドシートに専用テンプレートがなくても、
+        # カレンダーの予定名で判定して必ず独立表示する。
+        event_identity = f"{et} {event_name}"
+        if "フォロワー別" in event_identity and "グルコン" in event_identity:
+            follower_events.append(ev)
+        elif "初心者" in event_identity and "相談会" in event_identity:
+            beginner_events.append(ev)
+        elif "特別講義" in et:
             special.append(ev)
         elif "講師対談" in et:
             instructor.append(ev)
@@ -148,10 +162,24 @@ def build_monthly_overview(events: List[Dict[str, Any]], month_str: str) -> str:
     instructor = sort_by_date(instructor)
     student = sort_by_date(student)
     genre_events = sort_by_date(genre_events)
+    follower_events = sort_by_date(follower_events)
     online_events = sort_by_date(online_events)
+    beginner_events = sort_by_date(beginner_events)
     other = sort_by_date(other)
 
     lines = [f"# {month_str}のイベント案内📢", ""]
+
+    # フォロワー別グルコンは、専用テンプレートの有無にかかわらず最上部に表示。
+    if follower_events:
+        lines.append("## 【フォロワー別グルコン】")
+        lines.append("")
+        for i, ev in enumerate(follower_events, 1):
+            date_fmt = _format_date_short(ev.get("date", ""), ev.get("time", ""), year)
+            event_name = str(ev.get("event_name", "")).strip() or "フォロワー別グルコン"
+            lines.append(f"{_num(i)}開催日：{date_fmt}")
+            lines.append(f"イベント名：{event_name}")
+            lines.append("")
+        lines.append("")
 
     # その他ジャンル（未分類イベントがある場合のみ、最上部に表示）
     if other:
@@ -175,6 +203,16 @@ def build_monthly_overview(events: List[Dict[str, Any]], month_str: str) -> str:
             date_fmt = _format_date_short(ev.get("date", ""), ev.get("time", ""), year)
             lines.append(f"{_num(i)}{event_label}")
             lines.append(f"開催日：{date_fmt}")
+            lines.append("")
+        lines.append("")
+
+    # 初心者ツール相談会は、複数日程を一つの項目にまとめる。
+    if beginner_events:
+        lines.append("## 【初心者ツール相談会】")
+        lines.append("")
+        for i, ev in enumerate(beginner_events, 1):
+            date_fmt = _format_date_short(ev.get("date", ""), ev.get("time", ""), year)
+            lines.append(f"{_num(i)}開催日：{date_fmt}")
             lines.append("")
         lines.append("")
 

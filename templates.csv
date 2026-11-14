@@ -1,4 +1,4 @@
-﻿event_type,template,channels,match_keywords,delivery_time
+﻿event_type,template,channels,match_keywords,delivery_time,delivery_day
 ジャンル特化グルコン（当日告知）,"@everyone
 
 ## 本日{{date}}の{{time}}よりジャンル特化グルコンが開催されます📢
@@ -103,3 +103,29 @@ https://script.google.com/macros/s/AKfycbywYV7EiZSXqjhIsNh0F_49Jl6FKkY6hTXJ9ZyxX
 
 ▼以下のリンクから出席フォームをご提出後、表示されるリンクよりご参加ください▼
 https://script.google.com/macros/s/AKfycbywYV7EiZSXqjhIsNh0F_49Jl6FKkY6hTXJ9ZyxXYvjT3J_YEEHhK2wxvda6Fo2HUuA/exec?p=3","万垢お知らせチャンネル, 講師お知らせ, 専属講師チーム",万垢生限定オン会,08:00
+初心者ツール相談会（事前告知）,"@everyone
+
+## 明日{{date}}の{{time}}より初心者ツール相談会が開催されます🔰
+
+初心者ツール相談会は、Zoomで運営スタッフと一緒に
+わからない操作や課題の進め方を確認できるグループ相談会です。
+
+・Discordの使い方
+・初投稿プログラムや課題の進め方
+・Googleスプレッドシートの使い方
+など、どんな基本的なことでも、お気軽にご質問ください✨
+
+※アカウント運用や専門的な内容に関するご質問にはお答えできかねます。
+
+ご質問は先着順でお受けします。
+聞きたいことや、どの操作でつまずいたかを事前にメモしておくと、当日のご案内がスムーズです。
+
+### 【Zoom参加の際のお願い】
+
+Zoomの表示名のご変更をお願いいたします！お名前＋現役生の方はクラス名、卒業生の方は卒業生と記載してください🙇🏻‍♀️
+
+## 初心者ツール相談会は予約制です！
+
+## 下記リンクよりフォームに申し込みの上、ご参加ください💡
+
+https://liff.line.me/2001359303-6EmGr8rA/landing?follow=%40065bwadm&lp=h1lWbX&liff_id=2001359303-6EmGr8rA",オンラインイベント開催のお知らせ,"初心者ツール,相談会",18:00,前日
