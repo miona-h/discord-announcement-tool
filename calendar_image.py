@@ -608,6 +608,24 @@ def generate_calendar_image(
                         # 省略記号や講師名の欠落を避け、最大6行まで全文を表示する。
                         title_lines = title_lines[:6]
                 card_height = card_bottom - cy
+                time_text = str(event.get("time", "") or "")
+                if category in ("成果報告", "週報提出") and card_height < 105:
+                    time_text = ""
+                show_time = bool(time_text and time_text != "00:00")
+                minimum_icon_height = 105 if compact_card else 150
+                has_icon_space = card_height >= minimum_icon_height
+                icon_size = 38 if compact_card else min(70, card_height - 12)
+                icon_y = card_bottom - icon_size - 6
+                if show_time:
+                    if compact_card and has_icon_space:
+                        time_y = card_bottom - 58
+                    else:
+                        time_y = card_bottom - (100 if has_icon_space else 20)
+                    title_bottom_limit = time_y - 15
+                elif has_icon_space:
+                    title_bottom_limit = icon_y - 6
+                else:
+                    title_bottom_limit = card_bottom - 6
                 try:
                     title_font_size = max(8, min(28, int(event.get("_calendar_font_size"))))
                 except (TypeError, ValueError):
@@ -615,27 +633,31 @@ def generate_calendar_image(
                         title_font_size = 16
                     else:
                         title_font_size = 12 if compact_card else 17
+                if category in ("成果報告", "週報提出") and card_height < 90:
+                    text_y = cy + 4
+                else:
+                    text_y = cy + 8
+                # タイトル・講師名が開催時間や画像へ重ならない範囲で、最大の文字サイズを使う。
+                while (
+                    title_font_size > 8
+                    and title_lines
+                    and len(title_lines) * (title_font_size + 3) > title_bottom_limit - text_y
+                ):
+                    title_font_size -= 1
                 title_font = _event_font(title_font_size)
                 title_step = title_font_size + 3
                 if category in ("成果報告", "週報提出") and card_height < 90:
-                    text_y = cy + max(4, (card_height - len(title_lines) * title_step) // 2)
-                else:
-                    text_y = cy + 8
+                    text_y = cy + max(
+                        4,
+                        (card_height - len(title_lines) * title_step) // 2,
+                    )
                 for line in title_lines:
                     draw.text(
                         (x0 + cell_w // 2, text_y), line, anchor="ma",
                         font=title_font, fill="#101A2E",
                     )
                     text_y += title_step
-                time_text = str(event.get("time", "") or "")
-                if category in ("成果報告", "週報提出") and card_height < 105:
-                    time_text = ""
-                if time_text and time_text != "00:00":
-                    has_icon_space = card_bottom - cy >= (105 if compact_card else 150)
-                    if compact_card and has_icon_space:
-                        time_y = card_bottom - 58
-                    else:
-                        time_y = card_bottom - (100 if has_icon_space else 20)
+                if show_time:
                     draw.text(
                         (x0 + cell_w // 2, time_y), time_text, anchor="mm",
                         font=_event_font(16 if compact_card else 19), fill="#101A2E",
@@ -653,11 +675,8 @@ def generate_calendar_image(
                     source = _read_image(profile_images.get(instagram_url), remove_background=False)
                 if source is None:
                     source = _read_image(illustrations.get(category))
-                minimum_icon_height = 105 if compact_card else 150
-                if card_bottom - cy >= minimum_icon_height:
-                    icon_size = 38 if compact_card else min(70, card_bottom - cy - 12)
+                if has_icon_space:
                     icon_x = x0 + (cell_w - icon_size) // 2
-                    icon_y = card_bottom - icon_size - 6
                     if category in ("オフ会", "オン会"):
                         if source is not None:
                             fitted = ImageOps.fit(

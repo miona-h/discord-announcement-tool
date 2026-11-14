@@ -210,7 +210,10 @@ def _render_image_library_picker(
         if save_error:
             st.error(save_error)
         elif saved_path:
+            selection_changed = st.session_state.get(selected_path_key) != saved_path
             st.session_state[selected_path_key] = saved_path
+            if selection_changed:
+                st.rerun()
 
     assets = _list_image_library()
     st.caption(f"最近使用した順・{len(assets)}/{CALENDAR_IMAGE_LIBRARY_LIMIT}件")
@@ -1106,11 +1109,7 @@ if GOOGLE_API_AVAILABLE:
                             else st.session_state.get(other_color_key, DEFAULT_CATEGORY_STYLES["その他"])
                         )
                     saved_image_path_key = f"calendar_event_library_path_{int(image_year)}_{int(image_month)}_{event_id}"
-                    draft_image_path_key = f"calendar_draft_image_path_{int(image_year)}_{int(image_month)}_{event_id}"
-                    image_path = (
-                        st.session_state.get(draft_image_path_key, st.session_state.get(saved_image_path_key))
-                        if event_id == active_id else st.session_state.get(saved_image_path_key)
-                    )
+                    image_path = st.session_state.get(saved_image_path_key)
                     if image_path:
                         image_data = _read_saved_asset(image_path)
                         if image_data:
@@ -1118,14 +1117,8 @@ if GOOGLE_API_AVAILABLE:
                     saved_remove_background_key = (
                         f"calendar_saved_remove_background_{int(image_year)}_{int(image_month)}_{event_id}"
                     )
-                    draft_remove_background_key = (
-                        f"calendar_draft_remove_background_{int(image_year)}_{int(image_month)}_{event_id}"
-                    )
                     event_copy["_calendar_remove_background"] = bool(
-                        st.session_state.get(
-                            draft_remove_background_key,
-                            st.session_state.get(saved_remove_background_key, False),
-                        ) if event_id == active_id else st.session_state.get(saved_remove_background_key, False)
+                        st.session_state.get(saved_remove_background_key, False)
                     )
                     preview_events.append(event_copy)
 
@@ -1190,30 +1183,17 @@ if GOOGLE_API_AVAILABLE:
                         saved_path_key = (
                             f"calendar_event_library_path_{int(image_year)}_{int(image_month)}_{focused_id}"
                         )
-                        draft_path_key = (
-                            f"calendar_draft_image_path_{int(image_year)}_{int(image_month)}_{focused_id}"
-                        )
                         saved_remove_key = (
                             f"calendar_saved_remove_background_{int(image_year)}_{int(image_month)}_{focused_id}"
                         )
-                        draft_remove_key = (
-                            f"calendar_draft_remove_background_{int(image_year)}_{int(image_month)}_{focused_id}"
-                        )
-                        if draft_path_key not in st.session_state:
-                            st.session_state[draft_path_key] = st.session_state.get(saved_path_key)
-                        if draft_remove_key not in st.session_state:
-                            st.session_state[draft_remove_key] = st.session_state.get(saved_remove_key, False)
+                        st.caption("画像の選択・削除・背景透過設定は自動保存されます。")
                         st.checkbox(
                             "画像の背景を透過する",
-                            key=draft_remove_key,
+                            key=saved_remove_key,
                             help="チェックした予定の画像だけ、四隅からつながる単色背景を透明にします。",
                         )
-                        if st.button("変更を保存", key=f"save_calendar_image_edit_{focused_id}", type="primary"):
-                            st.session_state[saved_path_key] = st.session_state.get(draft_path_key)
-                            st.session_state[saved_remove_key] = st.session_state.get(draft_remove_key, False)
-                            st.success("画像設定を保存しました。")
                         _render_image_library_picker(
-                            draft_path_key,
+                            saved_path_key,
                             f"calendar_side_library_{int(image_year)}_{int(image_month)}_{focused_id}",
                             columns_count=5,
                             page_size=20,
