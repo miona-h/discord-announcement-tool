@@ -1038,11 +1038,18 @@ if GOOGLE_API_AVAILABLE:
 
                 def default_calendar_setting(event, setting_name):
                     is_submission = classify_event(event) in ("成果報告", "週報提出")
+                    event_title = " ".join(
+                        str(event.get(key, "") or "")
+                        for key in ("_raw_summary", "event_name", "event_type")
+                    )
+                    is_beginner_tool = "初心者ツール" in event_title and "相談会" in event_title
                     if setting_name == "_calendar_font_size":
                         return 16 if is_submission else 17
                     if setting_name == "_calendar_max_lines":
                         return 10
                     if setting_name == "_calendar_height_weight":
+                        if is_beginner_tool:
+                            return 3.0
                         return 1.0 if is_submission else 6.0
                     return None
 
@@ -1216,6 +1223,7 @@ if GOOGLE_API_AVAILABLE:
                                 saved_text_key, event_display_text(focused_event)
                             )
                         st.text_area("表示文字（改行も反映）", height=220, key=draft_text_key)
+                        st.caption("入力内容は左のプレビューへ自動反映されます。確定する場合は保存してください。")
                         saved_font_key = f"calendar_saved_font_size_{int(image_year)}_{int(image_month)}_{focused_id}"
                         saved_lines_key = f"calendar_saved_max_lines_{int(image_year)}_{int(image_month)}_{focused_id}"
                         saved_weight_key = f"calendar_saved_height_weight_{int(image_year)}_{int(image_month)}_{focused_id}"
@@ -1249,7 +1257,7 @@ if GOOGLE_API_AVAILABLE:
                                     saved_color_key, DEFAULT_CATEGORY_STYLES["その他"]
                                 )
                             st.color_picker("この予定の背景色", key=draft_color_key)
-                        if st.button("変更を保存", key=f"save_calendar_text_edit_{focused_id}", type="primary"):
+                        if st.button("保存", key=f"save_calendar_text_edit_{focused_id}", type="primary"):
                             st.session_state[saved_text_key] = st.session_state[draft_text_key]
                             st.session_state[saved_font_key] = st.session_state[draft_font_key]
                             st.session_state[saved_lines_key] = st.session_state[draft_lines_key]

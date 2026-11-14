@@ -123,6 +123,77 @@ def _event_font(size: int) -> ImageFont.FreeTypeFont:
     return _font(size, True)
 
 
+def _draw_beginner_mark(draw: ImageDraw.ImageDraw, left: float, top: float, size: int) -> None:
+    """フォント未収録でも初心者マークをカラーで表示する。"""
+    width = max(8, int(size * 0.9))
+    height = max(9, int(size * 1.05))
+    x0, y0 = int(left), int(top)
+    points = [
+        (x0, y0),
+        (x0 + width // 2, y0 + max(2, height // 5)),
+        (x0 + width, y0),
+        (x0 + width, y0 + int(height * 0.68)),
+        (x0 + width // 2, y0 + height),
+        (x0, y0 + int(height * 0.68)),
+    ]
+    draw.polygon(points, fill="#FFFFFF")
+    draw.polygon(
+        [points[0], points[1], points[4], points[5]],
+        fill="#67B82E",
+    )
+    draw.polygon(
+        [points[1], points[2], points[3], points[4]],
+        fill="#F5E642",
+    )
+    draw.line(points + [points[0]], fill="#3F6E31", width=max(1, size // 10), joint="curve")
+
+
+def _event_line_bottom(
+    draw: ImageDraw.ImageDraw,
+    center_x: float,
+    line_y: float,
+    line: str,
+    font: ImageFont.FreeTypeFont,
+    font_size: int,
+) -> int:
+    """絵文字の代替描画も含めた1行の下端を返す。"""
+    if "🔰" not in line:
+        return draw.textbbox((center_x, line_y), line, anchor="ma", font=font)[3]
+    plain_text = line.replace("🔰", "").replace("️", "")
+    text_bottom = line_y
+    if plain_text:
+        text_bottom = draw.textbbox((0, line_y), plain_text, anchor="la", font=font)[3]
+    return int(max(text_bottom, line_y + font_size + 2))
+
+
+def _draw_event_line(
+    draw: ImageDraw.ImageDraw,
+    center_x: float,
+    line_y: float,
+    line: str,
+    font: ImageFont.FreeTypeFont,
+    font_size: int,
+    fill: str,
+) -> None:
+    """初心者マークを保ったまま予定の1行を中央揃えで描く。"""
+    if "🔰" not in line:
+        draw.text((center_x, line_y), line, anchor="ma", font=font, fill=fill)
+        return
+    plain_text = line.replace("🔰", "").replace("️", "")
+    text_bbox = draw.textbbox((0, 0), plain_text, anchor="la", font=font) if plain_text else (0, 0, 0, 0)
+    text_width = text_bbox[2] - text_bbox[0]
+    mark_width = max(8, int(font_size * 0.9))
+    gap = max(1, font_size // 8)
+    total_width = mark_width + (gap + text_width if plain_text else 0)
+    left = center_x - total_width / 2
+    _draw_beginner_mark(draw, left, line_y - 1, font_size)
+    if plain_text:
+        draw.text(
+            (left + mark_width + gap, line_y), plain_text,
+            anchor="la", font=font, fill=fill,
+        )
+
+
 def _month_title_font(size: int) -> ImageFont.FreeTypeFont:
     """月名に使う、太く柔らかい丸型の英字フォント。"""
     if os.path.exists(ROUNDED_TITLE_FONT):
@@ -176,7 +247,9 @@ def _event_text_lines(event: Dict[str, Any], max_chars: int = 9) -> List[str]:
     teacher = str(event.get("teacher_name", "") or "").strip()
     lines: List[str] = []
 
-    if category == "グルコン":
+    if "初心者ツール" in summary and "相談会" in summary:
+        lines.extend(["🔰初心者ツール", "相談会"])
+    elif category == "グルコン":
         if "フォロワー別" in f"{summary} {event_type}":
             lines.extend(["フォロワー別", "グルコン"])
         else:
@@ -227,6 +300,12 @@ def event_display_text(event: Dict[str, Any]) -> str:
 
 def _visible_event_layout(day_events: List[Dict[str, Any]], card_top: int, card_bottom_limit: int):
     """1日分の表示予定と縦方向のカード範囲を返す。描画とクリック判定で共用する。"""
+    def default_weight(event):
+        title = _display_title(event)
+        if "初心者ツール" in title and "相談会" in title:
+            return 3.0
+        return 1.0 if classify_event(event) in ("成果報告", "週報提出") else 6.0
+
     visible_events = day_events[:3]
     available_height = card_bottom_limit - card_top
     submission_events = [
@@ -237,15 +316,12 @@ def _visible_event_layout(day_events: List[Dict[str, Any]], card_top: int, card_
     ]
     if len(submission_events) >= 2 and regular_events:
         visible_events = submission_events[:2] + regular_events[:1]
-        default_weights = [1.0, 1.0, 6.0]
+        default_weights = [1.0, 1.0, default_weight(regular_events[0])]
     elif len(submission_events) == 1 and regular_events and len(day_events) == 2:
         visible_events = submission_events[:1] + regular_events[:1]
-        default_weights = [1.0, 6.0]
+        default_weights = [1.0, default_weight(regular_events[0])]
     else:
-        default_weights = [
-            1.0 if classify_event(event) in ("成果報告", "週報提出") else 6.0
-            for event in visible_events
-        ]
+        default_weights = [default_weight(event) for event in visible_events]
 
     if not visible_events:
         return [], []
@@ -657,10 +733,9 @@ def generate_calendar_image(
                         if line:
                             bottom = max(
                                 bottom,
-                                draw.textbbox(
-                                    (center_x, line_y), line,
-                                    anchor="ma", font=font,
-                                )[3],
+                                _event_line_bottom(
+                                    draw, center_x, line_y, line, font, font_size,
+                                ),
                             )
                         else:
                             bottom = max(bottom, line_y + step)
@@ -681,9 +756,14 @@ def generate_calendar_image(
                         (card_height - len(title_lines) * title_step) // 2,
                     )
                 for line in title_lines:
-                    draw.text(
-                        (x0 + cell_w // 2, text_y), line, anchor="ma",
-                        font=title_font, fill="#101A2E",
+                    _draw_event_line(
+                        draw,
+                        x0 + cell_w // 2,
+                        text_y,
+                        line,
+                        title_font,
+                        title_font_size,
+                        "#101A2E",
                     )
                     text_y += title_step
                 if show_time:
