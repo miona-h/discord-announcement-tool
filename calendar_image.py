@@ -16,6 +16,12 @@ from typing import Any, Dict, List, Optional
 from PIL import Image, ImageChops, ImageDraw, ImageFont, ImageOps
 
 try:
+    from janome.tokenizer import Tokenizer as JanomeTokenizer
+    _JANOME_TOKENIZER = JanomeTokenizer()
+except ImportError:
+    _JANOME_TOKENIZER = None
+
+try:
     import jpholiday
 except ImportError:  # ローカル確認時など、未導入でも画像生成は継続する
     jpholiday = None
@@ -402,11 +408,61 @@ def calendar_event_key_at_point(
 
 
 def _wrap_chars(text: str, max_chars: int, max_lines: int) -> List[str]:
-    compact = re.sub(r"\s+", " ", str(text)).strip()
-    lines = [compact[i:i + max_chars] for i in range(0, len(compact), max_chars)] or [""]
-    if len(lines) > max_lines:
-        lines = lines[:max_lines]
-    return lines
+    """最大文字数を基準に、単語を途中で切らずに折り返す。"""
+    source = str(text or "").strip()
+    if not source:
+        return [""]
+
+    # 空白を伴う縦線は「講師名｜説明」の明示的な区切りとして改行を優先する。
+    source = re.sub(r"\s+([｜︴|])\s+", r" \1\n", source)
+    paragraphs = source.splitlines()
+    lines: List[str] = []
+
+    for paragraph in paragraphs:
+        paragraph = paragraph.strip()
+        if not paragraph:
+            if lines and lines[-1] != "":
+                lines.append("")
+            continue
+
+        if _JANOME_TOKENIZER is not None:
+            words = [
+                token.surface for token in _JANOME_TOKENIZER.tokenize(paragraph)
+                if token.surface and not token.surface.isspace()
+            ]
+        else:
+            # Janome未導入時も英数字の単語だけは途中で分割しない。
+            words = re.findall(r"[A-Za-z0-9]+(?:[._+-][A-Za-z0-9]+)*|.", re.sub(r"\s+", "", paragraph))
+
+        # 「学ぶiPhone」のような短い日本語＋英単語は一つの意味単位として扱う。
+        merged_words: List[str] = []
+        for word in words:
+            if (
+                re.fullmatch(r"[A-Za-z0-9]+(?:[._+-][A-Za-z0-9]+)*", word)
+                and merged_words
+                and re.search(r"[ぁ-んァ-ン一-鿿]", merged_words[-1])
+                and len(merged_words[-1]) <= 3
+            ):
+                merged_words[-1] += word
+            else:
+                merged_words.append(word)
+
+        current = ""
+        for word in merged_words:
+            if not current:
+                current = word
+            elif len(current) + len(word) <= max_chars:
+                current += word
+            else:
+                lines.append(current)
+                current = word
+            if len(lines) >= max_lines:
+                break
+        if current and len(lines) < max_lines:
+            lines.append(current)
+        if len(lines) >= max_lines:
+            break
+    return lines[:max_lines] or [""]
 
 
 def _remove_edge_background(source: Image.Image) -> Image.Image:
