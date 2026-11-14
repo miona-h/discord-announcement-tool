@@ -331,8 +331,8 @@ def _wrap_chars(text: str, max_chars: int, max_lines: int) -> List[str]:
     return lines
 
 
-def _remove_dark_edge_background(source: Image.Image) -> Image.Image:
-    """黒背景が画像端につながっている場合だけ、その背景を透過する。"""
+def _remove_edge_background(source: Image.Image) -> Image.Image:
+    """四隅と同系色で画像端につながる背景だけを透過する。"""
     image = source.convert("RGBA")
     pixels = image.load()
     width, height = image.size
@@ -340,7 +340,21 @@ def _remove_dark_edge_background(source: Image.Image) -> Image.Image:
         return image
 
     corners = [pixels[0, 0], pixels[width - 1, 0], pixels[0, height - 1], pixels[width - 1, height - 1]]
-    if sum(1 for r, g, b, a in corners if a and max(r, g, b) < 80) < 2:
+    opaque_corners = [pixel for pixel in corners if pixel[3]]
+    if len(opaque_corners) < 2:
+        return image
+    reference = max(
+        opaque_corners,
+        key=lambda candidate: sum(
+            1 for other in opaque_corners
+            if sum(abs(candidate[channel] - other[channel]) for channel in range(3)) <= 75
+        ),
+    )
+    matching_corners = sum(
+        1 for other in opaque_corners
+        if sum(abs(reference[channel] - other[channel]) for channel in range(3)) <= 75
+    )
+    if matching_corners < 2:
         return image
 
     queue = deque()
@@ -355,19 +369,19 @@ def _remove_dark_edge_background(source: Image.Image) -> Image.Image:
             continue
         visited.add((x, y))
         r, g, b, a = pixels[x, y]
-        if not a or max(r, g, b) >= 90:
+        if not a or sum(abs((r, g, b)[channel] - reference[channel]) for channel in range(3)) > 90:
             continue
         pixels[x, y] = (r, g, b, 0)
         queue.extend(((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)))
     return image
 
 
-def _read_image(data: Optional[bytes], remove_dark_background: bool = True) -> Optional[Image.Image]:
+def _read_image(data: Optional[bytes], remove_background: bool = False) -> Optional[Image.Image]:
     if not data:
         return None
     try:
         source = Image.open(io.BytesIO(data)).convert("RGBA")
-        return _remove_dark_edge_background(source) if remove_dark_background else source
+        return _remove_edge_background(source) if remove_background else source
     except Exception:
         return None
 
@@ -629,10 +643,13 @@ def generate_calendar_image(
                 # 編集画面で予定ごとに登録した画像を最優先で使用する。
                 event_image_key = str(event.get("_calendar_image_key", "") or "")
                 # 予定ごとに選んだ写真は色を変えず、そのまま円形・四角形へ切り抜く。
-                source = _read_image(individual_images.get(event_image_key), remove_dark_background=False)
+                source = _read_image(
+                    individual_images.get(event_image_key),
+                    remove_background=bool(event.get("_calendar_remove_background")),
+                )
                 instagram_url = str(event.get("instagram_url", "") or "")
                 if source is None and instagram_url:
-                    source = _read_image(profile_images.get(instagram_url), remove_dark_background=False)
+                    source = _read_image(profile_images.get(instagram_url), remove_background=False)
                 if source is None:
                     source = _read_image(illustrations.get(category))
                 minimum_icon_height = 105 if compact_card else 150
@@ -641,11 +658,6 @@ def generate_calendar_image(
                     icon_x = x0 + (cell_w - icon_size) // 2
                     icon_y = card_bottom - icon_size - 6
                     if category in ("オフ会", "オン会"):
-                        # 会場・交流会イラストは、参考画像と同じ角丸四角フレーム。
-                        draw.rounded_rectangle(
-                            (icon_x - 3, icon_y - 3, icon_x + icon_size + 3, icon_y + icon_size + 3),
-                            radius=11, fill="#FFFFFF", outline="#D4E4F2", width=2,
-                        )
                         if source is not None:
                             fitted = ImageOps.fit(
                                 source.convert("RGBA"), (icon_size, icon_size),
@@ -657,15 +669,21 @@ def generate_calendar_image(
                             )
                             fitted.putalpha(ImageChops.multiply(fitted.getchannel("A"), mask))
                             image.alpha_composite(fitted, (icon_x, icon_y))
+                        else:
+                            draw.rounded_rectangle(
+                                (icon_x - 3, icon_y - 3, icon_x + icon_size + 3, icon_y + icon_size + 3),
+                                radius=11, fill="#FFFFFF", outline="#D4E4F2", width=2,
+                            )
                     else:
-                        # 講師画像は常に丸フレームを表示し、未登録時も追加位置が分かるようにする。
-                        draw.ellipse(
-                            (icon_x - 3, icon_y - 3, icon_x + icon_size + 3, icon_y + icon_size + 3),
-                            fill="#FFFFFF", outline="#D4E4F2", width=2,
-                        )
                         if source is not None:
                             icon = _circle_image(source, icon_size)
                             image.alpha_composite(icon, (icon_x, icon_y))
+                        else:
+                            # 未登録時だけ、画像を追加できる位置を示す枠を残す。
+                            draw.ellipse(
+                                (icon_x - 3, icon_y - 3, icon_x + icon_size + 3, icon_y + icon_size + 3),
+                                fill="#FFFFFF", outline="#D4E4F2", width=2,
+                            )
 
             if len(day_events) > 3:
                 draw.text((x1 - 10, y1 - 10), f"+{len(day_events) - 3}", anchor="rs", font=_font(18, True), fill="#075FB9")
