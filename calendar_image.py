@@ -167,8 +167,8 @@ def _event_text_lines(event: Dict[str, Any], max_chars: int = 9) -> List[str]:
     """元画像に近い「種別 → ジャンル → 講師名」の順で表示文言を作る。"""
     override = event.get("_calendar_display_text")
     if override is not None and str(override).strip():
-        # プレビュー画面で入力した改行をそのまま採用する。
-        return [line.strip() for line in str(override).splitlines() if line.strip()][:10]
+        # 空行も含め、プレビュー画面で入力した改行をそのまま採用する。
+        return [line.strip() for line in str(override).splitlines()][:10]
     category = classify_event(event)
     summary = _display_title(event)
     event_type = str(event.get("event_type", "") or "")
@@ -237,12 +237,15 @@ def _visible_event_layout(day_events: List[Dict[str, Any]], card_top: int, card_
     ]
     if len(submission_events) >= 2 and regular_events:
         visible_events = submission_events[:2] + regular_events[:1]
-        default_weights = [1.0, 1.0, 4.0]
+        default_weights = [1.0, 1.0, 6.0]
     elif len(submission_events) == 1 and regular_events and len(day_events) == 2:
         visible_events = submission_events[:1] + regular_events[:1]
-        default_weights = [1.0, 3.0]
+        default_weights = [1.0, 6.0]
     else:
-        default_weights = [1.0] * len(visible_events)
+        default_weights = [
+            1.0 if classify_event(event) in ("成果報告", "週報提出") else 6.0
+            for event in visible_events
+        ]
 
     if not visible_events:
         return [], []
@@ -605,16 +608,19 @@ def generate_calendar_image(
                         # 省略記号や講師名の欠落を避け、最大6行まで全文を表示する。
                         title_lines = title_lines[:6]
                 card_height = card_bottom - cy
-                if category in ("成果報告", "週報提出") and card_height < 90:
-                    text_y = cy + max(4, (card_height - len(title_lines) * 21) // 2)
-                else:
-                    text_y = cy + 8
                 try:
                     title_font_size = max(8, min(28, int(event.get("_calendar_font_size"))))
                 except (TypeError, ValueError):
-                    title_font_size = 12 if compact_card else 17
+                    if category in ("成果報告", "週報提出"):
+                        title_font_size = 16
+                    else:
+                        title_font_size = 12 if compact_card else 17
                 title_font = _event_font(title_font_size)
                 title_step = title_font_size + 3
+                if category in ("成果報告", "週報提出") and card_height < 90:
+                    text_y = cy + max(4, (card_height - len(title_lines) * title_step) // 2)
+                else:
+                    text_y = cy + 8
                 for line in title_lines:
                     draw.text(
                         (x0 + cell_w // 2, text_y), line, anchor="ma",

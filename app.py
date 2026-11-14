@@ -1019,24 +1019,11 @@ if GOOGLE_API_AVAILABLE:
 
                 def default_height_weight(selected_index):
                     selected = month_events[selected_index]
-                    selected_day = str(selected.get("date", ""))
-                    same_day = [
-                        (index, event) for index, event in enumerate(month_events)
-                        if str(event.get("date", "")) == selected_day
-                    ]
-                    submissions = [
-                        pair for pair in same_day
-                        if classify_event(pair[1]) in ("成果報告", "週報提出")
-                    ]
-                    regulars = [
-                        pair for pair in same_day
-                        if classify_event(pair[1]) not in ("成果報告", "週報提出")
-                    ]
-                    if len(submissions) >= 2 and regulars:
-                        return 1.0 if classify_event(selected) in ("成果報告", "週報提出") else 4.0
-                    if len(submissions) == 1 and regulars and len(same_day) == 2:
-                        return 1.0 if classify_event(selected) in ("成果報告", "週報提出") else 3.0
-                    return 1.0
+                    return (
+                        1.0
+                        if classify_event(selected) in ("成果報告", "週報提出")
+                        else 6.0
+                    )
 
                 def clear_event_draft(event_id):
                     for prefix in (
@@ -1232,8 +1219,15 @@ if GOOGLE_API_AVAILABLE:
                         draft_font_key = f"calendar_draft_font_size_{int(image_year)}_{int(image_month)}_{focused_id}"
                         draft_lines_key = f"calendar_draft_max_lines_{int(image_year)}_{int(image_month)}_{focused_id}"
                         draft_weight_key = f"calendar_draft_height_weight_{int(image_year)}_{int(image_month)}_{focused_id}"
+                        default_font_size = (
+                            16
+                            if classify_event(focused_event) in ("成果報告", "週報提出")
+                            else 17
+                        )
                         if draft_font_key not in st.session_state:
-                            st.session_state[draft_font_key] = st.session_state.get(saved_font_key, 14)
+                            st.session_state[draft_font_key] = st.session_state.get(
+                                saved_font_key, default_font_size
+                            )
                         if draft_lines_key not in st.session_state:
                             st.session_state[draft_lines_key] = st.session_state.get(saved_lines_key, 10)
                         if draft_weight_key not in st.session_state:
