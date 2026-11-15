@@ -210,6 +210,13 @@ def build_monthly_overview(events: List[Dict[str, Any]], month_str: str) -> str:
     if beginner_events:
         lines.append("## 【初心者ツール相談会】")
         lines.append("")
+        lines.append("※こちらは事前予約制となります。下記リンクよりご予約の上ご参加ください🙇🏻‍♀️")
+        lines.append("")
+        lines.append(
+            "[https://liff.line.me/2001359303-6EmGr8rA/landing?follow=%40065bwadm&lp=h1lWbX&liff\\_id=2001359303-6EmGr8rA]"
+            "(https://liff.line.me/2001359303-6EmGr8rA/landing?follow=%40065bwadm\\&lp=h1lWbX\\&liff_id=2001359303-6EmGr8rA)"
+        )
+        lines.append("")
         for i, ev in enumerate(beginner_events, 1):
             date_fmt = _format_date_short(ev.get("date", ""), ev.get("time", ""), year)
             lines.append(f"{_num(i)}開催日：{date_fmt}")
