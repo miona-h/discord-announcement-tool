@@ -1,0 +1,12 @@
+:root { color-scheme: light dark; }
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: transparent; font-family: sans-serif; }
+#hint { color: #666; font-size: 14px; margin: 0 0 7px; }
+#library { display: flex; gap: 7px; overflow-x: auto; padding: 4px 2px 9px; max-width: 700px; min-height: 82px; }
+.asset { flex: 0 0 72px; height: 72px; padding: 3px; border: 2px solid #d9e7f2; border-radius: 10px; background: white; cursor: grab; }
+.asset:active { cursor: grabbing; }
+.asset.dragging { opacity: .55; }
+.asset img { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+#stage { position: relative; border-radius: 8px; transition: box-shadow .15s; }
+#stage.over { box-shadow: 0 0 0 5px rgba(45, 144, 220, .5); }
+#calendar { display: block; height: auto; max-width: 100%; cursor: pointer; user-select: none; }
