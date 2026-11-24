@@ -241,7 +241,7 @@ def _display_title(event: Dict[str, Any]) -> str:
 
 
 def _event_text_lines(event: Dict[str, Any], max_chars: int = 9) -> List[str]:
-    """元画像に近い「種別 → ジャンル → 講師名」の順で表示文言を作る。"""
+    """文字数を抑えながら「ジャンル → 講師名・内容」の順で表示文言を作る。"""
     override = event.get("_calendar_display_text")
     if override is not None and str(override).strip():
         # 空行も含め、プレビュー画面で入力した改行をそのまま採用する。
@@ -258,8 +258,8 @@ def _event_text_lines(event: Dict[str, Any], max_chars: int = 9) -> List[str]:
     elif category == "グルコン":
         if "フォロワー別" in f"{summary} {event_type}":
             lines.extend(["フォロワー別", "グルコン"])
-        else:
-            lines.extend(["ジャンル特化", "グルコン"])
+        # 「ジャンル特化グルコン」は文字数が多いため種別名を表示せず、
+        # ジャンル・講師名・内容だけを表示する。
         if genre:
             clean_genre = re.sub(r"^[^\wぁ-んァ-ン一-鿿]+", "", genre).replace("ジャンル", "").strip()
             if clean_genre:
@@ -268,14 +268,14 @@ def _event_text_lines(event: Dict[str, Any], max_chars: int = 9) -> List[str]:
             bracket = re.search(r"[【\[]([^】\]]+)[】\]]", summary)
             if bracket:
                 label = bracket.group(1).replace("グルコン", "").strip("・ ")
-                if label:
+                if label and "ジャンル特化" not in label:
                     lines.append(f"【{label}】")
     elif category == "対談":
         talk_text = f"{summary} {event_type}"
         if "生徒対談" in talk_text:
-            lines.extend(["【生徒対談】", "ゲスト"])
+            lines.append("【生徒対談】")
         elif "講師対談" in talk_text:
-            lines.extend(["【講師対談】", "ゲスト"])
+            lines.append("【講師対談】")
         else:
             # マネタイズ対談など、新しい対談名は予定名を勝手に講師対談へ変換しない。
             lines.extend(_wrap_chars(summary, max_chars, 6))
@@ -292,7 +292,10 @@ def _event_text_lines(event: Dict[str, Any], max_chars: int = 9) -> List[str]:
         else:
             lines.extend(["オン会", "(in Zoom)"] if "zoom" in summary.lower() else ["オン会"])
     else:
-        lines.extend(_wrap_chars(summary, max_chars, 10))
+        # 「特別講義」の種別名は省き、実際の講義名・講師名を優先する。
+        clean_summary = re.sub(r"^[【\[]\s*特別講義\s*[】\]]\s*", "", summary).strip()
+        clean_summary = re.sub(r"^特別講義[：:\s・-]*", "", clean_summary).strip()
+        lines.extend(_wrap_chars(clean_summary or summary, max_chars, 10))
 
     if teacher and teacher not in " ".join(lines):
         lines.extend(_wrap_chars(teacher, max_chars, 4))
@@ -797,13 +800,16 @@ def generate_calendar_image(
                             bottom = max(bottom, line_y + step)
                     return bottom
 
-                # 実際の文字領域が開催時間や画像へ接触している間だけ縮小する。
-                while (
-                    title_font_size > 6
-                    and title_lines
-                    and measured_title_bottom(title_font_size) > safe_title_bottom
-                ):
-                    title_font_size -= 1
+                # 初期表示だけは、開催時間や画像へ接触しなくなるまで自動縮小する。
+                # 編集画面で文字サイズを変更した場合はユーザー指定を最優先し、
+                # 重なりが生じても指定サイズのまま描画する。
+                if not bool(event.get("_calendar_font_size_manual")):
+                    while (
+                        title_font_size > 6
+                        and title_lines
+                        and measured_title_bottom(title_font_size) > safe_title_bottom
+                    ):
+                        title_font_size -= 1
                 title_font = _event_font(title_font_size)
                 title_step = title_font_size + 3
 
