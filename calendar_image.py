@@ -245,7 +245,19 @@ def _event_text_lines(event: Dict[str, Any], max_chars: int = 9) -> List[str]:
     override = event.get("_calendar_display_text")
     if override is not None and str(override).strip():
         # 空行も含め、プレビュー画面で入力した改行をそのまま採用する。
-        return [line.strip() for line in str(override).splitlines()][:10]
+        override_text = str(override)
+        if "フォロワー別" in override_text:
+            # 旧バージョンで保存済みの「フォロワー別\nグルコン」も表示時に除去する。
+            override_text = re.sub(r"フォロワー別\s*グルコン", "", override_text)
+            override_lines = [
+                line for line in override_text.splitlines()
+                if line.strip() not in {"フォロワー別", "グルコン"}
+            ]
+            while override_lines and not override_lines[0].strip():
+                override_lines.pop(0)
+        else:
+            override_lines = override_text.splitlines()
+        return [line.strip() for line in override_lines][:10]
     category = classify_event(event)
     summary = _display_title(event)
     event_type = str(event.get("event_type", "") or "")
