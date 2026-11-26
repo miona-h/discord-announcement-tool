@@ -85,22 +85,29 @@ try:
 except ImportError:
     IMAGE_COORDINATES_AVAILABLE = False
 
-# Googleカレンダー連携（オプション）
+# Googleカレンダー連携（オプション）。補助関数が1つ古くても連携全体を非表示にしない。
+GOOGLE_API_IMPORT_ERROR = ""
 try:
-    from google_calendar_client import (
-        GOOGLE_API_AVAILABLE,
-        get_authorization_url,
-        exchange_code_for_credentials,
-        credentials_to_dict,
-        dict_to_credentials,
-        refresh_credentials_if_needed,
-        fetch_calendar_list,
-        fetch_upcoming_events,
-        api_event_to_event_data,
-        fetch_spreadsheet_values,
-    )
-except ImportError:
+    import google_calendar_client as _google_calendar_client
+
+    GOOGLE_API_AVAILABLE = _google_calendar_client.GOOGLE_API_AVAILABLE
+    get_authorization_url = _google_calendar_client.get_authorization_url
+    exchange_code_for_credentials = _google_calendar_client.exchange_code_for_credentials
+    credentials_to_dict = _google_calendar_client.credentials_to_dict
+    dict_to_credentials = _google_calendar_client.dict_to_credentials
+    refresh_credentials_if_needed = _google_calendar_client.refresh_credentials_if_needed
+    fetch_calendar_list = _google_calendar_client.fetch_calendar_list
+    fetch_upcoming_events = _google_calendar_client.fetch_upcoming_events
+    api_event_to_event_data = _google_calendar_client.api_event_to_event_data
+
+    if hasattr(_google_calendar_client, "fetch_spreadsheet_values"):
+        fetch_spreadsheet_values = _google_calendar_client.fetch_spreadsheet_values
+    else:
+        def fetch_spreadsheet_values(*args, **kwargs):
+            raise RuntimeError("google_calendar_client.pyを最新版へ更新してください。")
+except Exception as exc:
     GOOGLE_API_AVAILABLE = False
+    GOOGLE_API_IMPORT_ERROR = f"{type(exc).__name__}: {exc}"
 
 
 st.set_page_config(
