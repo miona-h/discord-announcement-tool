@@ -256,18 +256,19 @@ def _event_text_lines(event: Dict[str, Any], max_chars: int = 9) -> List[str]:
     if "初心者ツール" in summary and "相談会" in summary:
         lines.extend(["🔰初心者ツール", "相談会"])
     elif category == "グルコン":
-        if "フォロワー別" in f"{summary} {event_type}":
-            lines.extend(["フォロワー別", "グルコン"])
-        # 「ジャンル特化グルコン」は文字数が多いため種別名を表示せず、
-        # ジャンル・講師名・内容だけを表示する。
+        # 「ジャンル特化グルコン」「フォロワー別グルコン」は文字数が多いため
+        # 種別名を表示せず、ジャンル・講師名・内容だけを表示する。
         if genre:
-            clean_genre = re.sub(r"^[^\wぁ-んァ-ン一-鿿]+", "", genre).replace("ジャンル", "").strip()
+            clean_genre = re.sub(r"^[^\wぁ-んァ-ン一-鿿]+", "", genre)
+            clean_genre = clean_genre.replace("フォロワー別グルコン", "").replace("フォロワー別", "")
+            clean_genre = clean_genre.replace("ジャンル", "").strip()
             if clean_genre:
                 lines.append(f"【{clean_genre}】")
         else:
             bracket = re.search(r"[【\[]([^】\]]+)[】\]]", summary)
             if bracket:
-                label = bracket.group(1).replace("グルコン", "").strip("・ ")
+                label = bracket.group(1).replace("フォロワー別グルコン", "")
+                label = label.replace("フォロワー別", "").replace("グルコン", "").strip("・ ")
                 if label and "ジャンル特化" not in label:
                     lines.append(f"【{label}】")
     elif category == "対談":
