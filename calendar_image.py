@@ -6,8 +6,10 @@ from __future__ import annotations
 import calendar
 import html
 import io
+import json
 import os
 import re
+import urllib.parse
 import urllib.request
 from collections import deque
 from datetime import date, datetime
@@ -536,10 +538,96 @@ def _read_image(data: Optional[bytes], remove_background: bool = False) -> Optio
         return None
 
 
+_BROWSER_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+)
+
+
+def instagram_username(instagram_url: str) -> str:
+    """https://www.instagram.com/<name>/ からユーザー名を取り出す。"""
+    match = re.search(r"instagram\.com/([A-Za-z0-9._]+)", str(instagram_url or ""), re.I)
+    if not match:
+        return ""
+    name = match.group(1).strip(".").lower()
+    return "" if name in {"p", "reel", "reels", "stories", "explore", "accounts"} else name
+
+
+def _download_image(url: str, timeout: int, headers: Optional[Dict[str, str]] = None) -> Optional[bytes]:
+    req = urllib.request.Request(url, headers={"User-Agent": _BROWSER_UA, **(headers or {})})
+    with urllib.request.urlopen(req, timeout=timeout) as response:
+        data = response.read(5_000_000)
+    if not data:
+        return None
+    try:
+        Image.open(io.BytesIO(data)).verify()
+    except Exception:
+        return None
+    return data
+
+
+def _instagram_via_web_api(username: str, timeout: int) -> Optional[bytes]:
+    """Instagram Webが内部で使うプロフィールAPI。サーバーのIPによっては拒否される。"""
+    api_url = (
+        "https://i.instagram.com/api/v1/users/web_profile_info/?username="
+        + urllib.parse.quote(username)
+    )
+    req = urllib.request.Request(
+        api_url,
+        headers={
+            "User-Agent": _BROWSER_UA,
+            "x-ig-app-id": "936619743392459",
+            "Accept": "application/json",
+            "Accept-Language": "ja,en-US;q=0.8,en;q=0.6",
+            "Referer": f"https://www.instagram.com/{username}/",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as response:
+        payload = json.loads(response.read(2_000_000).decode("utf-8", "ignore"))
+    user = ((payload or {}).get("data") or {}).get("user") or {}
+    image_url = user.get("profile_pic_url_hd") or user.get("profile_pic_url")
+    return _download_image(image_url, timeout) if image_url else None
+
+
+def _instagram_via_unavatar(username: str, timeout: int) -> Optional[bytes]:
+    """外部サービス unavatar.io 経由（無料枠は1日あたりの回数制限あり）。"""
+    return _download_image(
+        f"https://unavatar.io/instagram/{urllib.parse.quote(username)}?fallback=false", timeout
+    )
+
+
 def fetch_instagram_profile_image(instagram_url: str, timeout: int = 6) -> Optional[bytes]:
-    """Instagramページの og:image を最善努力で取得する。制限時は None。"""
+    """Instagramのプロフィール画像を最善努力で取得する。すべて失敗した場合は None。
+
+    1. Instagram Web の内部API
+    2. プロフィールページの og:image
+    3. unavatar.io
+    の順に試す。Instagramはクラウドサーバーからのアクセスを強く制限しているため、
+    Streamlit Cloud上ではすべて失敗することがある。
+    """
     if not instagram_url or "instagram.com" not in instagram_url.lower():
         return None
+    username = instagram_username(instagram_url)
+    if username:
+        try:
+            data = _instagram_via_web_api(username, timeout)
+            if data:
+                return data
+        except Exception:
+            pass
+    data = _instagram_via_og_image(instagram_url, timeout)
+    if data:
+        return data
+    if username:
+        try:
+            return _instagram_via_unavatar(username, timeout)
+        except Exception:
+            return None
+    return None
+
+
+def _instagram_via_og_image(instagram_url: str, timeout: int) -> Optional[bytes]:
+    """Instagramページの og:image を取得する。ログイン画面に飛ばされた場合は None。"""
     try:
         page_req = urllib.request.Request(
             instagram_url,
@@ -564,6 +652,88 @@ def fetch_instagram_profile_image(instagram_url: str, timeout: int = 6) -> Optio
         return data if data else None
     except Exception:
         return None
+
+
+GRADIENT_DIRECTIONS = ("縦", "横", "斜め", "放射")
+
+
+def _hex_to_rgb(value: str, fallback: str = "#F1F5F9") -> tuple[int, int, int]:
+    text = str(value or fallback).strip().lstrip("#")
+    if len(text) == 3:
+        text = "".join(ch * 2 for ch in text)
+    try:
+        return tuple(int(text[i:i + 2], 16) for i in (0, 2, 4))  # type: ignore[return-value]
+    except ValueError:
+        return _hex_to_rgb(fallback) if value != fallback else (241, 245, 249)
+
+
+def event_background_fill(event: Dict[str, Any], default_color: str) -> Any:
+    """予定に保存された背景設定を、単色(str)またはグラデーション(dict)で返す。"""
+    color1 = str(event.get("_calendar_background_color") or default_color)
+    if str(event.get("_calendar_background_style") or "") != "gradient":
+        return color1
+    color2 = str(event.get("_calendar_background_color2") or color1)
+    direction = str(event.get("_calendar_gradient_direction") or "斜め")
+    if direction not in GRADIENT_DIRECTIONS:
+        direction = "斜め"
+    return {"colors": (color1, color2), "direction": direction}
+
+
+def _gradient_layer(size: tuple[int, int], colors: tuple[str, str], direction: str) -> Image.Image:
+    """2色グラデーション画像を作る。中間に少し明るい光沢を入れて立体感を出す。"""
+    width, height = max(1, size[0]), max(1, size[1])
+    start = _hex_to_rgb(colors[0])
+    end = _hex_to_rgb(colors[1])
+    # 256段階の帯を作り、L画像の値(0-255)で位置を指定して色を引く。
+    steps = []
+    for i in range(256):
+        t = i / 255
+        rgb = [round(start[c] + (end[c] - start[c]) * t) for c in range(3)]
+        # 中央付近にごく薄いハイライト（最大+18%）を重ねて“豪華さ”を出す。
+        shine = max(0.0, 1 - abs(t - 0.35) / 0.25) * 0.18
+        rgb = [round(v + (255 - v) * shine) for v in rgb]
+        steps.append(tuple(rgb))
+
+    vertical = Image.linear_gradient("L")  # 上=0（色1）→下=255（色2）
+    horizontal = vertical.rotate(90, expand=True)  # 左=0（色1）→右=255（色2）
+    if direction == "横":
+        ramp = horizontal
+    elif direction == "放射":
+        ramp = Image.radial_gradient("L")  # 中心=色1 → 外側=色2
+    elif direction == "斜め":
+        # 左上=色1 → 右下=色2
+        ramp = ImageOps.autocontrast(Image.blend(vertical, horizontal, 0.5))
+    else:
+        ramp = vertical
+    ramp = ramp.resize((width, height), Image.Resampling.BILINEAR)
+    palette_rgb = [channel for color in steps for channel in color]
+    indexed = ramp.convert("P")
+    indexed.putpalette(palette_rgb)
+    return indexed.convert("RGBA")
+
+
+def _fill_rounded(
+    image: Image.Image,
+    box: tuple[int, int, int, int],
+    radius: int,
+    fill: Any,
+    outline: Optional[str] = None,
+    width: int = 0,
+) -> None:
+    """角丸四角形を単色またはグラデーションで塗る。"""
+    draw = ImageDraw.Draw(image)
+    if not isinstance(fill, dict):
+        draw.rounded_rectangle(box, radius=radius, fill=fill, outline=outline, width=width)
+        return
+    x0, y0, x1, y1 = [int(v) for v in box]
+    size = (max(1, x1 - x0 + 1), max(1, y1 - y0 + 1))
+    layer = _gradient_layer(size, tuple(fill.get("colors") or ("#F1F5F9", "#F1F5F9")), str(fill.get("direction") or "斜め"))
+    mask = Image.new("L", size, 0)
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, size[0] - 1, size[1] - 1), radius=radius, fill=255)
+    layer.putalpha(mask)
+    image.alpha_composite(layer, (x0, y0))
+    if outline and width:
+        draw.rounded_rectangle(box, radius=radius, outline=outline, width=width)
 
 
 def _circle_image(source: Image.Image, size: int) -> Image.Image:
@@ -725,7 +895,13 @@ def generate_calendar_image(
 
             day_events = by_day.get(day, [])
             base_category = classify_event(day_events[0]) if day_events else "その他"
-            draw.rounded_rectangle((x0, y0, x1, y1), radius=20, fill=colors[base_category], outline="#C5DDF2", width=2)
+            day_fill: Any = colors[base_category]
+            # 「日の背景にも適用」にチェックした予定があれば、その予定の背景で日全体を塗る。
+            for day_event in day_events:
+                if day_event.get("_calendar_apply_day_background") and day_event.get("_calendar_background_color"):
+                    day_fill = event_background_fill(day_event, colors[classify_event(day_event)])
+                    break
+            _fill_rounded(image, (x0, y0, x1, y1), 20, day_fill, outline="#C5DDF2", width=2)
             is_holiday = _is_japanese_holiday(year, month, day)
             day_color = "#E92E3C" if col == 0 or is_holiday else "#07518D" if col == 6 else "#111827"
             draw.text((x0 + cell_w // 2, y0 + 28), str(day), anchor="mm", font=_rounded_font(42), fill=day_color)
@@ -737,10 +913,10 @@ def generate_calendar_image(
             for idx, event in enumerate(visible_events):
                 cy, card_bottom = card_boxes[idx]
                 category = classify_event(event)
-                event_color = colors[category]
+                event_color: Any = colors[category]
                 if category == "その他" and event.get("_calendar_background_color"):
-                    event_color = str(event["_calendar_background_color"])
-                draw.rounded_rectangle((x0 + 7, cy, x1 - 7, card_bottom), radius=13, fill=event_color, outline="#FFFFFF", width=2)
+                    event_color = event_background_fill(event, colors[category])
+                _fill_rounded(image, (x0 + 7, cy, x1 - 7, card_bottom), 13, event_color, outline="#FFFFFF", width=2)
                 title_lines = _event_text_lines(event, max_chars=7)
                 compact_card = len(day_events) > 1 and card_bottom - cy < 180
                 custom_max_lines = event.get("_calendar_max_lines")

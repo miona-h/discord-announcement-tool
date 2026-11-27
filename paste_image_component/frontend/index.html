@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <script src="./streamlit-component-lib.js"></script>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div id="label"></div>
+    <div id="dropzone" tabindex="0" contenteditable="true" spellcheck="false" aria-label="画像の貼り付け先">
+      <div id="message" contenteditable="false">
+        <strong>📋 ここをクリックして貼り付け</strong><br />
+        <span>画像をコピー → Ctrl+V（Macは ⌘V）。ドラッグ＆ドロップもできます。</span>
+      </div>
+      <img id="preview" alt="" contenteditable="false" />
+    </div>
+    <script src="./main.js"></script>
+  </body>
+</html>
