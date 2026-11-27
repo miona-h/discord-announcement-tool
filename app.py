@@ -34,7 +34,9 @@ from generate_announcement import AnnouncementGenerator
 from monthly_overview import build_monthly_overview
 from calendar_image import (
     DEFAULT_CATEGORY_STYLES,
+    GRADIENT_DIRECTIONS,
     calendar_event_hit_at_point,
+    instagram_username,
     classify_event,
     event_display_text,
     fetch_instagram_profile_image,
@@ -46,6 +48,11 @@ try:
     LIVE_TEXTAREA_AVAILABLE = True
 except Exception:
     LIVE_TEXTAREA_AVAILABLE = False
+try:
+    from paste_image_component import paste_image
+    PASTE_IMAGE_AVAILABLE = True
+except Exception:
+    PASTE_IMAGE_AVAILABLE = False
 try:
     from calendar_drag_component import calendar_drag_preview
     CALENDAR_DRAG_AVAILABLE = True
@@ -72,6 +79,41 @@ try:
         CALENDAR_RENDERER_VERSION = hashlib.sha1(renderer_file.read()).hexdigest()[:12]
 except OSError:
     CALENDAR_RENDERER_VERSION = "unavailable"
+
+# 予定ごとの背景設定。名前はセッションキー（calendar_saved_<name>_...）に使う。
+# other_color は既存の保存キーと互換。
+BACKGROUND_SETTING_FIELDS = {
+    "other_color": "_calendar_background_color",
+    "other_color2": "_calendar_background_color2",
+    "bg_style": "_calendar_background_style",
+    "bg_direction": "_calendar_gradient_direction",
+    "apply_day_bg": "_calendar_apply_day_background",
+}
+BACKGROUND_SETTING_NAMES = tuple(BACKGROUND_SETTING_FIELDS)
+BACKGROUND_STYLE_OPTIONS = ["単色", "グラデーション"]
+# 文字（濃紺）が読みやすい明るめの組み合わせ。
+GRADIENT_PRESETS = {
+    "カスタム": None,
+    "ゴールド": ("#FFF6C9", "#E9B44C"),
+    "ローズゴールド": ("#FFF0EA", "#E8A2A2"),
+    "シャンパン": ("#FFFDF5", "#E6D3A3"),
+    "サクラ": ("#FFF0F6", "#F9A8D4"),
+    "ラベンダー": ("#F5EEFF", "#B79CF0"),
+    "オーロラ": ("#D9FFF4", "#A5B8FF"),
+    "スカイ": ("#EAF6FF", "#7CC0F5"),
+    "ミント": ("#F0FFF7", "#86E3B8"),
+    "サンセット": ("#FFF1D6", "#FF9E8A"),
+}
+
+
+def background_defaults() -> dict:
+    return {
+        "other_color": DEFAULT_CATEGORY_STYLES["その他"],
+        "other_color2": "#FFFFFF",
+        "bg_style": "単色",
+        "bg_direction": "斜め",
+        "apply_day_bg": False,
+    }
 
 try:
     from streamlit_oauth import OAuth2Component
@@ -135,8 +177,11 @@ GOOGLE_SCOPE_STR = " ".join(GOOGLE_SCOPE_LIST)
 
 @st.cache_data(ttl=86400, show_spinner=False)
 def _cached_instagram_profile_image(instagram_url: str):
-    """Instagram画像を1日キャッシュし、画像生成時の待ち時間を抑える。"""
-    return fetch_instagram_profile_image(instagram_url)
+    """取得できたInstagram画像だけを1日キャッシュする（失敗は次回また試す）。"""
+    data = fetch_instagram_profile_image(instagram_url)
+    if not data:
+        raise LookupError("instagram image unavailable")
+    return data
 
 
 def _save_calendar_asset(category: str, uploaded_file) -> str:
@@ -276,14 +321,21 @@ def _list_image_library(force: bool = False) -> list[tuple[str, str]]:
             files = service.files().list(
                 q=query, spaces="drive", orderBy="modifiedTime desc",
                 pageSize=CALENDAR_IMAGE_LIBRARY_LIMIT,
-                fields="files(id,name,modifiedTime)",
+                fields="files(id,name,modifiedTime,appProperties)",
             ).execute().get("files", [])
             assets = []
+            instagram_map = {}
             for item in files:
                 name = item.get("name", "image")
                 label = name.split("__", 1)[-1]
-                assets.append((label, f"{CALENDAR_IMAGE_LIBRARY_DRIVE_PREFIX}{item['id']}"))
-            st.session_state["_drive_library_list_cache"] = {"at": time.monotonic(), "assets": assets}
+                reference = f"{CALENDAR_IMAGE_LIBRARY_DRIVE_PREFIX}{item['id']}"
+                assets.append((label, reference))
+                username = (item.get("appProperties") or {}).get("instagram_user")
+                if username and username not in instagram_map:  # 新しい順なので最初が最新
+                    instagram_map[username] = reference
+            st.session_state["_drive_library_list_cache"] = {
+                "at": time.monotonic(), "assets": assets, "instagram": instagram_map,
+            }
             return assets
         except Exception:
             pass
@@ -341,6 +393,43 @@ def _save_image_library_asset(uploaded_file) -> tuple[str, str]:
         return "", f"Google Driveへの保存に失敗しました: {e}"
 
 
+def _instagram_image_map() -> dict:
+    """Instagramユーザー名 → ライブラリ画像 の対応表（講師アイコンの記憶）。"""
+    _list_image_library()
+    mapping = dict((st.session_state.get("_drive_library_list_cache") or {}).get("instagram") or {})
+    mapping.update(st.session_state.get("_instagram_image_map_local") or {})
+    return mapping
+
+
+def _remember_instagram_image(instagram_url: str, path: str) -> None:
+    """予定に選んだ画像を、その講師（Instagramアカウント）のアイコンとして記憶する。"""
+    username = instagram_username(instagram_url)
+    if not username or not path:
+        return
+    st.session_state.setdefault("_instagram_image_map_local", {})[username] = path
+    if not str(path).startswith(CALENDAR_IMAGE_LIBRARY_DRIVE_PREFIX):
+        return
+    service = _get_image_library_drive_service()
+    if service is None:
+        return
+    try:
+        file_id = str(path)[len(CALENDAR_IMAGE_LIBRARY_DRIVE_PREFIX):]
+        folder_id = _get_image_library_drive_folder(service)
+        safe_username = username.replace("'", "")
+        query = (
+            f"'{folder_id}' in parents and trashed=false and "
+            f"appProperties has {{ key='instagram_user' and value='{safe_username}' }}"
+        )
+        old_files = service.files().list(q=query, spaces="drive", fields="files(id)", pageSize=20).execute().get("files", [])
+        for old in old_files:
+            if old["id"] != file_id:
+                service.files().update(fileId=old["id"], body={"appProperties": {"instagram_user": None}}).execute()
+        service.files().update(fileId=file_id, body={"appProperties": {"instagram_user": username}}).execute()
+        _invalidate_image_library_cache()
+    except Exception:
+        pass
+
+
 def _touch_image_library_asset(path: str) -> None:
     try:
         if str(path or "").startswith(CALENDAR_IMAGE_LIBRARY_DRIVE_PREFIX):
@@ -371,7 +460,8 @@ def _delete_image_library_asset(path: str) -> None:
 
 
 def _render_image_library_picker(
-    selected_path_key: str, widget_prefix: str, columns_count: int = 6, page_size: int = 24
+    selected_path_key: str, widget_prefix: str, columns_count: int = 6, page_size: int = 24,
+    on_selected=None,
 ) -> None:
     """共通画像ライブラリをサムネイルで表示し、選択結果を保存する。"""
     st.markdown("### 🖼️ 画像ライブラリ")
@@ -390,12 +480,30 @@ def _render_image_library_picker(
         help=f"全予定で共通利用できます。最大{CALENDAR_IMAGE_LIBRARY_LIMIT}件です。",
     )
     if uploaded is not None:
+        # アップロード欄に残ったファイルを再実行のたびに選択し直さないようにする。
+        upload_id = str(getattr(uploaded, "file_id", "") or f"{uploaded.name}:{uploaded.size}")
+        upload_processed_key = f"{widget_prefix}_upload_processed"
+        if st.session_state.get(upload_processed_key) == upload_id:
+            uploaded = None
+        else:
+            st.session_state[upload_processed_key] = upload_id
+    if PASTE_IMAGE_AVAILABLE:
+        pasted = paste_image(key=f"{widget_prefix}_paste", height=96)
+        processed_key = f"{widget_prefix}_paste_processed"
+        if pasted is not None and pasted.nonce and st.session_state.get(processed_key) != pasted.nonce:
+            st.session_state[processed_key] = pasted.nonce
+            uploaded = pasted  # 以降はファイルアップロードと同じ処理で保存する
+    else:
+        st.caption("貼り付け機能の部品（paste_image_componentフォルダ）が見つかりません。")
+    if uploaded is not None:
         saved_path, save_error = _save_image_library_asset(uploaded)
         if save_error:
             st.error(save_error)
         elif saved_path:
             selection_changed = st.session_state.get(selected_path_key) != saved_path
             st.session_state[selected_path_key] = saved_path
+            if on_selected:
+                on_selected(saved_path)
             if selection_changed:
                 st.rerun()
 
@@ -431,6 +539,8 @@ def _render_image_library_picker(
             ):
                 st.session_state[selected_path_key] = path
                 _touch_image_library_asset(path)
+                if on_selected:
+                    on_selected(path)
                 st.rerun()
 
 
@@ -1301,10 +1411,30 @@ if GOOGLE_API_AVAILABLE:
                         "calendar_draft_max_lines", "calendar_draft_height_weight",
                         "calendar_draft_other_color", "calendar_draft_image_path",
                         "calendar_draft_remove_background",
+                        *(f"calendar_draft_{name}" for name in BACKGROUND_SETTING_NAMES),
                     ):
                         st.session_state.pop(
                             f"{prefix}_{int(image_year)}_{int(image_month)}_{event_id}", None
                         )
+
+                def background_key(kind, name, event_id):
+                    """kind: saved / draft、name: BACKGROUND_SETTING_NAMES の要素。"""
+                    return f"calendar_{kind}_{name}_{int(image_year)}_{int(image_month)}_{event_id}"
+
+                def apply_background_settings(event_copy, event_id, use_draft):
+                    """保存済み（編集中は下書き）の背景設定を予定データへ反映する。"""
+                    if classify_event(event_copy) != "その他":
+                        return
+                    defaults = background_defaults()
+                    for name, field in BACKGROUND_SETTING_FIELDS.items():
+                        saved = st.session_state.get(background_key("saved", name, event_id), defaults[name])
+                        value = (
+                            st.session_state.get(background_key("draft", name, event_id), saved)
+                            if use_draft else saved
+                        )
+                        if name == "bg_style":
+                            value = "gradient" if value == "グラデーション" else "solid"
+                        event_copy[field] = value
 
                 st.markdown("### 🖼️ 画像プレビュー編集")
                 st.caption(
@@ -1319,6 +1449,12 @@ if GOOGLE_API_AVAILABLE:
 
                 active_index = int(st.session_state[target_key])
                 active_id = calendar_event_key(month_events[active_index], active_index)
+
+                instagram_image_map = _instagram_image_map()
+
+                def remembered_instagram_image(event):
+                    """画像を個別に選んでいない予定は、記憶済みの講師アイコンを使う。"""
+                    return instagram_image_map.get(instagram_username(event.get("instagram_url", "")))
 
                 preview_events = []
                 preview_event_images = {}
@@ -1368,19 +1504,9 @@ if GOOGLE_API_AVAILABLE:
                                 or st.session_state.get(saved_manual_key)
                                 or value != default_value
                             )
-                    other_color_key = f"calendar_saved_other_color_{int(image_year)}_{int(image_month)}_{event_id}"
-                    draft_color_key = f"calendar_draft_other_color_{int(image_year)}_{int(image_month)}_{event_id}"
-                    if classify_event(event_copy) == "その他":
-                        event_copy["_calendar_background_color"] = (
-                            st.session_state.get(
-                                draft_color_key,
-                                st.session_state.get(other_color_key, DEFAULT_CATEGORY_STYLES["その他"]),
-                            )
-                            if event_id == active_id
-                            else st.session_state.get(other_color_key, DEFAULT_CATEGORY_STYLES["その他"])
-                        )
+                    apply_background_settings(event_copy, event_id, use_draft=event_id == active_id)
                     saved_image_path_key = f"calendar_event_library_path_{int(image_year)}_{int(image_month)}_{event_id}"
-                    image_path = st.session_state.get(saved_image_path_key)
+                    image_path = st.session_state.get(saved_image_path_key) or remembered_instagram_image(event_copy)
                     if image_path:
                         image_data = _read_saved_asset(image_path)
                         if image_data:
@@ -1445,6 +1571,10 @@ if GOOGLE_API_AVAILABLE:
                                         )
                                         st.session_state[saved_path_key] = drag_value["path"]
                                         _touch_image_library_asset(drag_value["path"])
+                                        _remember_instagram_image(
+                                            month_events[event_index_by_key[clicked_event_key]].get("instagram_url", ""),
+                                            drag_value["path"],
+                                        )
                                     else:
                                         if clicked_event_key != active_id:
                                             clear_event_draft(active_id)
@@ -1515,7 +1645,16 @@ if GOOGLE_API_AVAILABLE:
                             f"calendar_side_library_{int(image_year)}_{int(image_month)}_{focused_id}",
                             columns_count=5,
                             page_size=20,
+                            on_selected=lambda path, url=focused_event.get("instagram_url", ""): (
+                                _remember_instagram_image(url, path)
+                            ),
                         )
+                        focused_username = instagram_username(focused_event.get("instagram_url", ""))
+                        if focused_username:
+                            st.caption(
+                                f"💡 選んだ画像は @{focused_username} のアイコンとして記憶され、"
+                                "同じInstagramリンクを持つ他の予定・翌月以降にも自動で使われます。"
+                            )
                     elif st.session_state[focus_key] == "text":
                         st.info(f"予定を編集：{event_label}")
                         saved_text_key = f"calendar_saved_display_text_{int(image_year)}_{int(image_month)}_{focused_id}"
@@ -1581,14 +1720,55 @@ if GOOGLE_API_AVAILABLE:
                         st.slider("最大行数", 1, 10, key=draft_lines_key)
                         st.slider("予定の縦幅比率", 0.5, 10.0, step=0.5, key=draft_weight_key)
                         st.caption("同じ日の他の予定との比率で縦幅が決まります。")
-                        if classify_event(focused_event) == "その他":
-                            saved_color_key = f"calendar_saved_other_color_{int(image_year)}_{int(image_month)}_{focused_id}"
-                            draft_color_key = f"calendar_draft_other_color_{int(image_year)}_{int(image_month)}_{focused_id}"
-                            if draft_color_key not in st.session_state:
-                                st.session_state[draft_color_key] = st.session_state.get(
-                                    saved_color_key, DEFAULT_CATEGORY_STYLES["その他"]
+                        is_other_category = classify_event(focused_event) == "その他"
+                        if is_other_category:
+                            bg_draft = {
+                                name: background_key("draft", name, focused_id)
+                                for name in BACKGROUND_SETTING_NAMES
+                            }
+                            for name, default_value in background_defaults().items():
+                                if bg_draft[name] not in st.session_state:
+                                    st.session_state[bg_draft[name]] = st.session_state.get(
+                                        background_key("saved", name, focused_id), default_value
+                                    )
+                            st.markdown("**この予定の背景**")
+                            st.radio(
+                                "塗り方", BACKGROUND_STYLE_OPTIONS,
+                                key=bg_draft["bg_style"], horizontal=True,
+                            )
+                            if st.session_state[bg_draft["bg_style"]] == "グラデーション":
+                                preset_key = f"calendar_bg_preset_{int(image_year)}_{int(image_month)}_{focused_id}"
+
+                                def apply_gradient_preset(
+                                    preset_key=preset_key, color1_key=bg_draft["other_color"],
+                                    color2_key=bg_draft["other_color2"],
+                                ):
+                                    colors = GRADIENT_PRESETS.get(st.session_state.get(preset_key))
+                                    if colors:
+                                        st.session_state[color1_key], st.session_state[color2_key] = colors
+
+                                st.selectbox(
+                                    "プリセット", list(GRADIENT_PRESETS), key=preset_key,
+                                    on_change=apply_gradient_preset,
+                                    help="選ぶと下の2色に反映されます。そのあと色を微調整することもできます。",
                                 )
-                            st.color_picker("この予定の背景色", key=draft_color_key)
+                                color_col1, color_col2 = st.columns(2)
+                                with color_col1:
+                                    st.color_picker("開始色", key=bg_draft["other_color"])
+                                with color_col2:
+                                    st.color_picker("終了色", key=bg_draft["other_color2"])
+                                st.radio(
+                                    "向き", list(GRADIENT_DIRECTIONS),
+                                    key=bg_draft["bg_direction"], horizontal=True,
+                                    help="縦＝上→下、横＝左→右、斜め＝左上→右下、放射＝中心→外側",
+                                )
+                            else:
+                                st.color_picker("この予定の背景色", key=bg_draft["other_color"])
+                            st.checkbox(
+                                "この背景を日全体（日付のマス）にも適用する",
+                                key=bg_draft["apply_day_bg"],
+                                help="同じ日に複数の予定でチェックした場合は、時間が早い予定の背景が使われます。",
+                            )
                         if st.button("保存", key=f"save_calendar_text_edit_{focused_id}", type="primary"):
                             st.session_state[saved_text_key] = st.session_state[draft_text_key]
                             st.session_state[saved_font_key] = st.session_state[draft_font_key]
@@ -1598,8 +1778,11 @@ if GOOGLE_API_AVAILABLE:
                             )
                             st.session_state[saved_lines_key] = st.session_state[draft_lines_key]
                             st.session_state[saved_weight_key] = st.session_state[draft_weight_key]
-                            if classify_event(focused_event) == "その他":
-                                st.session_state[saved_color_key] = st.session_state[draft_color_key]
+                            if is_other_category:
+                                for name in BACKGROUND_SETTING_NAMES:
+                                    st.session_state[background_key("saved", name, focused_id)] = (
+                                        st.session_state[bg_draft[name]]
+                                    )
                             st.success("変更を保存しました。")
                     else:
                         st.info("左のカレンダーから編集したい予定をクリックしてください。")
@@ -1642,12 +1825,8 @@ if GOOGLE_API_AVAILABLE:
                                     and event_copy[setting_name] != default_font_size
                                 )
                             )
-                    other_color_key = f"calendar_saved_other_color_{int(image_year)}_{int(image_month)}_{event_id}"
-                    if classify_event(event_copy) == "その他":
-                        event_copy["_calendar_background_color"] = st.session_state.get(
-                            other_color_key, DEFAULT_CATEGORY_STYLES["その他"]
-                        )
-                    selected_path = st.session_state.get(image_path_key)
+                    apply_background_settings(event_copy, event_id, use_draft=False)
+                    selected_path = st.session_state.get(image_path_key) or remembered_instagram_image(event_copy)
                     if selected_path:
                         image_data = _read_saved_asset(selected_path)
                         if image_data:
@@ -1747,7 +1926,10 @@ if GOOGLE_API_AVAILABLE:
             use_instagram = st.checkbox(
                 "Instagramリンクから講師アイコンの自動取得を試す",
                 value=True,
-                help="Instagram側の制限により取得できない場合は、カテゴリ別イラストへ自動で切り替わります。",
+                help=(
+                    "Instagram側の制限により取得できない場合は、カテゴリ別イラストへ自動で切り替わります。"
+                    "一度画像を貼り付け・選択した講師は、次回からその画像が自動で使われます。"
+                ),
             )
             st.caption(
                 "講師画像を取得するには、Googleカレンダー予定の説明欄へ講師のInstagramプロフィールURLを"
@@ -1760,13 +1942,18 @@ if GOOGLE_API_AVAILABLE:
                 instagram_images = {}
                 failed_instagram = 0
                 if use_instagram:
+                    # 画像を選択済み・講師アイコンを記憶済みの予定は取得不要。
                     instagram_urls = sorted({
                         str(event.get("instagram_url", "") or "").strip()
-                        for event in render_month_events if event.get("instagram_url")
+                        for event in render_month_events
+                        if event.get("instagram_url") and event.get("_calendar_image_key") not in event_images
                     })
                     with st.spinner(f"Instagram画像を取得中…（0/{len(instagram_urls)}）"):
                         for instagram_url in instagram_urls:
-                            image_data = _cached_instagram_profile_image(instagram_url)
+                            try:
+                                image_data = _cached_instagram_profile_image(instagram_url)
+                            except LookupError:
+                                image_data = None
                             if image_data:
                                 instagram_images[instagram_url] = image_data
                             else:
@@ -1787,6 +1974,8 @@ if GOOGLE_API_AVAILABLE:
                         st.warning(
                             f"Instagram画像は{failed_instagram}件取得できなかったため、"
                             "登録したイラストまたは画像なしで生成しました。"
+                            "プレビューで予定の画像枠をクリックし、アイコンを貼り付けると"
+                            "講師ごとに記憶され、次回から自動で使われます。"
                         )
                     st.success("カレンダー画像を生成しました。")
                 except Exception as e:

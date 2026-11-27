@@ -1,0 +1,35 @@
+:root {
+  font-family: var(--font, sans-serif);
+  color: var(--text, #31333f);
+}
+* { box-sizing: border-box; }
+body { margin: 0; padding: 0; background: transparent; }
+#label { font-size: 14px; margin-bottom: 6px; }
+#label:empty { display: none; }
+#dropzone {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 2px dashed color-mix(in srgb, var(--text, #31333f) 30%, transparent);
+  border-radius: 10px;
+  background: var(--secondary, #f0f2f6);
+  outline: none;
+  cursor: pointer;
+  caret-color: transparent;
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 1.5;
+}
+#dropzone:focus, #dropzone.dragover {
+  border-color: var(--primary, #ff4b4b);
+  border-style: solid;
+}
+#dropzone.done { border-color: #21a366; border-style: solid; }
+#dropzone.error { border-color: #e03131; }
+#message { flex: 1; user-select: none; }
+#message span { opacity: 0.75; }
+#preview { display: none; max-height: 72px; max-width: 96px; border-radius: 6px; object-fit: contain; }
+#preview.show { display: block; }
